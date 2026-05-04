@@ -1,12 +1,14 @@
 const fs = require('fs');
 const path = require('path');
+const { pathToFileURL } = require('url');
 const { app, BrowserWindow, Tray, Menu, globalShortcut, ipcMain, dialog, desktopCapturer, screen, clipboard, nativeImage, shell, Notification } = require('electron');
 const { loadConfig, saveConfig } = require('./config');
 const { getForegroundApp, buildForegroundSlug } = require('./platform/foreground');
+const { enqueueDescription, startDescriptionQueue } = require('./llm/lmstudio');
 
 let tray;
 let settingsWindow;
-let overlayWindow;
+let overlayWindows = [];
 let config;
 let foregroundAtSnip = null;
 
@@ -65,34 +67,48 @@ function registerHotkey() {
   if (!ok) dialog.showErrorBox('BetterSnip', `Could not register hotkey: ${config.hotkey}`);
 }
 
-async function startSnip() {
-  if (overlayWindow) return;
-  foregroundAtSnip = await getForegroundApp();
-  const displays = screen.getAllDisplays();
-  const bounds = displays.reduce((acc, d) => ({
-    x: Math.min(acc.x, d.bounds.x),
-    y: Math.min(acc.y, d.bounds.y),
-    right: Math.max(acc.right, d.bounds.x + d.bounds.width),
-    bottom: Math.max(acc.bottom, d.bounds.y + d.bounds.height)
-  }), { x: Infinity, y: Infinity, right: -Infinity, bottom: -Infinity });
-
-  overlayWindow = new BrowserWindow({
-    x: bounds.x,
-    y: bounds.y,
-    width: bounds.right - bounds.x,
-    height: bounds.bottom - bounds.y,
-    frame: false,
-    transparent: true,
-    alwaysOnTop: true,
-    fullscreenable: false,
-    skipTaskbar: true,
-    resizable: false,
-    movable: false,
-    webPreferences: { preload: path.join(__dirname, 'preload.js') }
+function applyAutoStart(enabled) {
+  if (process.platform !== 'win32') return;
+  app.setLoginItemSettings({
+    openAtLogin: !!enabled,
+    path: process.execPath,
+    args: isDev ? [path.resolve(__dirname, '..')] : []
   });
-  overlayWindow.setAlwaysOnTop(true, 'screen-saver');
-  overlayWindow.loadFile(path.join(__dirname, 'renderer', 'overlay.html'));
-  overlayWindow.on('closed', () => { overlayWindow = null; });
+}
+
+async function startSnip() {
+  if (overlayWindows.length) return;
+  foregroundAtSnip = await getForegroundApp();
+
+  overlayWindows = screen.getAllDisplays().map((display) => {
+    const win = new BrowserWindow({
+      x: display.bounds.x,
+      y: display.bounds.y,
+      width: display.bounds.width,
+      height: display.bounds.height,
+      frame: false,
+      transparent: true,
+      alwaysOnTop: true,
+      fullscreenable: false,
+      skipTaskbar: true,
+      resizable: false,
+      movable: false,
+      webPreferences: { preload: path.join(__dirname, 'preload.js') }
+    });
+    win.setAlwaysOnTop(true, 'screen-saver');
+    win.loadFile(path.join(__dirname, 'renderer', 'overlay.html'), {
+      query: {
+        x: String(display.bounds.x),
+        y: String(display.bounds.y),
+        width: String(display.bounds.width),
+        height: String(display.bounds.height)
+      }
+    });
+    win.on('closed', () => {
+      overlayWindows = overlayWindows.filter(w => w !== win);
+    });
+    return win;
+  });
 }
 
 function sleep(ms) {
@@ -112,7 +128,7 @@ function showSavedToast(filePath) {
 
 async function captureAndSave(rect) {
   ensureSaveDir();
-  if (overlayWindow) overlayWindow.hide();
+  overlayWindows.forEach(w => w.hide());
   await sleep(160);
   const display = screen.getDisplayMatching(rect);
   const sources = await desktopCapturer.getSources({
@@ -134,6 +150,7 @@ async function captureAndSave(rect) {
   const filePath = uniqueFilePath(config.saveDir, `${slug}-${timestamp()}`, ext);
   fs.writeFileSync(filePath, buffer);
   if (config.copyToClipboard) clipboard.writeImage(cropped);
+  enqueueDescription(filePath, config);
   return filePath;
 }
 
@@ -150,10 +167,23 @@ ipcMain.handle('settings:openDir', () => {
   ensureSaveDir();
   shell.openPath(config.saveDir);
 });
+ipcMain.handle('gallery:list', () => {
+  ensureSaveDir();
+  const exts = new Set(['.png', '.jpg', '.jpeg']);
+  return fs.readdirSync(config.saveDir, { withFileTypes: true })
+    .filter(d => d.isFile() && exts.has(path.extname(d.name).toLowerCase()))
+    .map(d => {
+      const filePath = path.join(config.saveDir, d.name);
+      const stat = fs.statSync(filePath);
+      return { name: d.name, path: filePath, url: pathToFileURL(filePath).href, mtime: stat.mtimeMs };
+    })
+    .sort((a, b) => b.mtime - a.mtime);
+});
 ipcMain.handle('onboarding:finish', (_, next) => {
   config = saveConfig({ ...config, ...next, onboardingComplete: true });
   ensureSaveDir();
   registerHotkey();
+  startDescriptionQueue(config);
   return config;
 });
 ipcMain.handle('window:minimize', () => BrowserWindow.getFocusedWindow()?.minimize());
@@ -162,12 +192,21 @@ ipcMain.handle('settings:save', (_, next) => {
   config = saveConfig({ ...config, ...next });
   ensureSaveDir();
   registerHotkey();
+  applyAutoStart(config.autoStart);
+  startDescriptionQueue(config);
   return config;
 });
-ipcMain.handle('snip:cancel', () => { if (overlayWindow) overlayWindow.close(); });
+function closeOverlays() {
+  const wins = [...overlayWindows];
+  overlayWindows = [];
+  wins.forEach(w => { if (!w.isDestroyed()) w.close(); });
+}
+
+ipcMain.handle('snip:cancel', () => closeOverlays());
 ipcMain.handle('snip:capture', async (_, rect) => {
   const filePath = await captureAndSave(rect);
-  if (overlayWindow) overlayWindow.close();
+  closeOverlays();
+  settingsWindow?.webContents.send('gallery:changed');
   showSavedToast(filePath);
   return filePath;
 });
@@ -177,6 +216,8 @@ app.whenReady().then(() => {
   ensureSaveDir();
   createTray();
   registerHotkey();
+  applyAutoStart(config.autoStart);
+  startDescriptionQueue(config);
   createSettingsWindow(config.onboardingComplete ? 'settings' : 'onboarding');
 });
 

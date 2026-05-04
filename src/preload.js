@@ -6,6 +6,8 @@ contextBridge.exposeInMainWorld('betterSnip', {
   saveSettings: (settings) => ipcRenderer.invoke('settings:save', settings),
   finishOnboarding: (settings) => ipcRenderer.invoke('onboarding:finish', settings),
   openDir: () => ipcRenderer.invoke('settings:openDir'),
+  listGallery: () => ipcRenderer.invoke('gallery:list'),
+  onGalleryChanged: (callback) => ipcRenderer.on('gallery:changed', callback),
   minimizeWindow: () => ipcRenderer.invoke('window:minimize'),
   closeWindow: () => ipcRenderer.invoke('window:close'),
   cancelSnip: () => ipcRenderer.invoke('snip:cancel'),

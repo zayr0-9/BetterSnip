@@ -1,17 +1,45 @@
 {
   "name": "better-snip",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Lightweight tray-first screen snipping app with foreground-app filenames.",
   "productName": "BetterSnip",
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
-    "dev": "electron ."
+    "dev": "electron .",
+    "build": "electron-builder --win nsis portable"
   },
-  "keywords": ["electron", "screenshot", "snip"],
+  "keywords": [
+    "electron",
+    "screenshot",
+    "snip"
+  ],
   "author": "",
   "license": "MIT",
+  "build": {
+    "appId": "com.bettersnip.app",
+    "productName": "BetterSnip",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  },
   "devDependencies": {
-    "electron": "^33.4.11"
+    "electron": "^33.4.11",
+    "electron-builder": "^26.8.1"
   }
 }

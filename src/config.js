@@ -7,7 +7,16 @@ const DEFAULTS = {
   hotkey: 'Alt+Shift+S',
   imageFormat: 'png',
   copyToClipboard: true,
-  onboardingComplete: false
+  autoStart: false,
+  onboardingComplete: false,
+  lmStudio: {
+    enabled: false,
+    address: 'localhost',
+    port: '1234',
+    model: 'gemma-3-4b-it',
+    autoLoad: true,
+    systemPrompt: 'Describe this screenshot clearly and concisely.'
+  }
 };
 
 function configPath() {

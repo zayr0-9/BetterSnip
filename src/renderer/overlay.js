@@ -1,7 +1,21 @@
 const box = document.getElementById('box');
+const params = new URLSearchParams(location.search);
+const display = {
+  x: Number(params.get('x') || 0),
+  y: Number(params.get('y') || 0),
+  width: Number(params.get('width') || window.innerWidth),
+  height: Number(params.get('height') || window.innerHeight)
+};
 let start = null;
 let current = null;
 let dragging = false;
+
+function clampPoint(e) {
+  return {
+    x: Math.max(0, Math.min(e.clientX, display.width)),
+    y: Math.max(0, Math.min(e.clientY, display.height))
+  };
+}
 
 function updateBox() {
   const x = Math.min(start.x, current.x);
@@ -13,30 +27,35 @@ function updateBox() {
 
 window.addEventListener('mousedown', (e) => {
   dragging = true;
-  start = { x: e.screenX, y: e.screenY, clientX: e.clientX, clientY: e.clientY };
-  current = { x: e.screenX, y: e.screenY, clientX: e.clientX, clientY: e.clientY };
+  start = clampPoint(e);
+  current = clampPoint(e);
   updateBox();
 });
 
 window.addEventListener('mousemove', (e) => {
   if (!dragging) return;
-  current = { x: e.screenX, y: e.screenY, clientX: e.clientX, clientY: e.clientY };
+  current = clampPoint(e);
   updateBox();
 });
 
 window.addEventListener('mouseup', async (e) => {
   if (!dragging) return;
   dragging = false;
-  current = { x: e.screenX, y: e.screenY, clientX: e.clientX, clientY: e.clientY };
-  const rect = {
+  current = clampPoint(e);
+  const local = {
     x: Math.min(start.x, current.x),
     y: Math.min(start.y, current.y),
     width: Math.abs(current.x - start.x),
     height: Math.abs(current.y - start.y)
   };
-  if (rect.width < 5 || rect.height < 5) return window.betterSnip.cancelSnip();
+  if (local.width < 5 || local.height < 5) return window.betterSnip.cancelSnip();
   document.body.style.cursor = 'wait';
-  await window.betterSnip.captureSnip(rect);
+  await window.betterSnip.captureSnip({
+    x: display.x + local.x,
+    y: display.y + local.y,
+    width: local.width,
+    height: local.height
+  });
 });
 
 window.addEventListener('keydown', (e) => {
