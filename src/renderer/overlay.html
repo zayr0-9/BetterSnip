@@ -1,0 +1,21 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Snip</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    html, body { margin:0; width:100%; height:100%; overflow:hidden; cursor:crosshair; user-select:none; }
+    #shade { position:fixed; inset:0; background:rgba(0,0,0,.35); }
+    #box { position:fixed; border:2px solid #38bdf8; background:rgba(56,189,248,.12); display:none; box-shadow:0 0 0 99999px rgba(0,0,0,.28); }
+    #hint { position:fixed; top:16px; left:50%; transform:translateX(-50%); }
+  </style>
+</head>
+<body>
+  <div id="shade"></div>
+  <div id="box"></div>
+  <div id="hint" class="rounded bg-zinc-950/80 text-white px-4 py-2 text-sm">Drag to select. Esc cancels.</div>
+  <script src="overlay.js"></script>
+</body>
+</html>

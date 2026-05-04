@@ -1,0 +1,17 @@
+{
+  "name": "better-snip",
+  "version": "0.1.0",
+  "description": "Lightweight tray-first screen snipping app with foreground-app filenames.",
+  "productName": "BetterSnip",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron ."
+  },
+  "keywords": ["electron", "screenshot", "snip"],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^33.4.11"
+  }
+}

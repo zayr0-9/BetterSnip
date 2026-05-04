@@ -1,0 +1,112 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>BetterSnip Settings</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    .drag-region { -webkit-app-region: drag; }
+    .no-drag { -webkit-app-region: no-drag; }
+  </style>
+</head>
+<body class="bg-slate-100 text-slate-900 min-h-screen overflow-hidden">
+  <header class="drag-region h-11 flex items-center justify-between bg-white border-b border-slate-200 shadow-sm">
+    <div class="px-4 flex items-center gap-2 text-sm font-semibold">
+      <span class="grid h-6 w-6 place-items-center rounded-lg bg-blue-600 text-white text-xs">✂</span>
+      <span>BetterSnip</span>
+    </div>
+    <div class="no-drag flex h-full">
+      <button id="minimize" class="w-12 hover:bg-slate-100 text-slate-600">—</button>
+      <button id="close" class="w-12 hover:bg-red-500 text-slate-600 hover:text-white">×</button>
+    </div>
+  </header>
+
+  <main class="p-6">
+    <section id="settingsView" class="mx-auto max-w-xl rounded-2xl bg-white border border-slate-200 shadow-sm p-6 space-y-6">
+      <div>
+        <h1 class="text-2xl font-bold tracking-tight">Settings</h1>
+        <p class="text-slate-500 mt-1">Configure your lightweight screenshot workflow.</p>
+      </div>
+
+      <div class="space-y-2">
+        <label class="text-sm font-medium text-slate-700">Save folder</label>
+        <div class="flex gap-2">
+          <input id="saveDir" class="flex-1 rounded-xl bg-slate-50 border border-slate-300 px-3 py-2 text-sm text-slate-700 outline-none focus:ring-2 focus:ring-blue-500" readonly>
+          <button id="chooseDir" class="rounded-xl bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 text-sm font-medium">Change</button>
+        </div>
+        <button id="openDir" class="w-full rounded-xl bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 text-sm font-medium">Browse Gallery</button>
+      </div>
+
+      <div class="space-y-2">
+        <label class="text-sm font-medium text-slate-700">Global hotkey</label>
+        <input id="hotkey" placeholder="Alt+Shift+S" class="w-full rounded-xl bg-slate-50 border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500">
+        <p class="text-xs text-slate-500">Electron accelerator format, e.g. Alt+Shift+S, Ctrl+Shift+X.</p>
+      </div>
+
+      <div class="grid grid-cols-2 gap-4">
+        <div class="space-y-2">
+          <label class="text-sm font-medium text-slate-700">Image format</label>
+          <select id="imageFormat" class="w-full rounded-xl bg-slate-50 border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500">
+            <option value="png">PNG</option>
+            <option value="jpg">JPG</option>
+          </select>
+        </div>
+
+        <label class="mt-7 flex items-center gap-3 rounded-xl bg-slate-50 border border-slate-200 px-3 py-2">
+          <input id="copyToClipboard" type="checkbox" class="h-4 w-4 accent-blue-600">
+          <span class="text-sm text-slate-700">Copy to clipboard</span>
+        </label>
+      </div>
+
+      <div class="flex items-center gap-3 pt-2">
+        <button id="save" class="rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2 text-sm font-semibold">Save settings</button>
+        <p id="status" class="text-sm text-slate-500"></p>
+      </div>
+    </section>
+
+    <section id="onboardingView" class="hidden mx-auto max-w-xl rounded-2xl bg-white border border-slate-200 shadow-sm p-6 min-h-[420px] flex flex-col">
+      <div class="flex items-center justify-between mb-6">
+        <div>
+          <h1 class="text-2xl font-bold tracking-tight">Welcome to BetterSnip</h1>
+          <p id="onboardingSubtitle" class="text-slate-500 mt-1">Set up your screenshot storage.</p>
+        </div>
+        <div class="text-sm text-slate-400"><span id="stepNo">1</span>/2</div>
+      </div>
+
+      <div id="stepFolder" class="space-y-5">
+        <div class="rounded-2xl bg-blue-50 border border-blue-100 p-5">
+          <div class="text-4xl mb-3">📁</div>
+          <h2 class="font-semibold text-lg">Choose image storage location</h2>
+          <p class="text-sm text-slate-600 mt-1">All snips will be saved here. You can change it later in settings.</p>
+        </div>
+        <div class="flex gap-2">
+          <input id="onboardSaveDir" class="flex-1 rounded-xl bg-slate-50 border border-slate-300 px-3 py-2 text-sm text-slate-700 outline-none" readonly>
+          <button id="onboardChooseDir" class="rounded-xl bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 text-sm font-medium">Select folder</button>
+        </div>
+      </div>
+
+      <div id="stepHotkey" class="hidden space-y-5">
+        <div class="rounded-2xl bg-emerald-50 border border-emerald-100 p-5">
+          <div class="text-4xl mb-3">⌨️</div>
+          <h2 class="font-semibold text-lg">Pick your snip hotkey</h2>
+          <p class="text-sm text-slate-600 mt-1">Press this shortcut anytime to start selecting an area.</p>
+        </div>
+        <div class="space-y-2">
+          <label class="text-sm font-medium text-slate-700">Global hotkey</label>
+          <input id="onboardHotkey" placeholder="Alt+Shift+S" class="w-full rounded-xl bg-slate-50 border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500">
+        </div>
+      </div>
+
+      <div class="mt-auto flex items-center justify-between pt-6">
+        <button id="backOnboarding" class="invisible rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 text-sm font-medium">Back</button>
+        <div class="flex items-center gap-3">
+          <p id="onboardingStatus" class="text-sm text-red-500"></p>
+          <button id="nextOnboarding" class="rounded-xl bg-slate-900 hover:bg-slate-800 text-white px-5 py-2 text-sm font-semibold">Next</button>
+        </div>
+      </div>
+    </section>
+  </main>
+  <script src="settings.js"></script>
+</body>
+</html>
