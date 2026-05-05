@@ -51,7 +51,9 @@ function makeThumb(item, index, small = false) {
   const btn = document.createElement('button');
   btn.className = `${small ? 'h-16 w-24' : 'h-20 w-28'} shrink-0 overflow-hidden rounded-xl border border-slate-200 bg-slate-200 ${index === currentImage ? 'thumb-current' : ''}`;
   btn.title = item.name;
-  btn.innerHTML = `<img src="${item.url}" class="h-full w-full object-cover" alt="${item.name}">`;
+  btn.innerHTML = item.type === 'video'
+    ? `<div class="grid h-full w-full place-items-center bg-slate-900 text-white"><div class="text-center"><div class="text-2xl">▶</div><div class="max-w-full truncate px-1 text-[10px]">${item.name}</div></div></div>`
+    : `<img src="${item.url}" class="h-full w-full object-cover" alt="${item.name}">`;
   btn.addEventListener('click', () => openGallery(index));
   return btn;
 }
@@ -65,8 +67,13 @@ async function loadGallery() {
 function renderModal() {
   if (!gallery.length) return;
   const item = gallery[currentImage];
-  $('modalImage').src = item.url;
-  $('modalCaption').textContent = `${currentImage + 1} / ${gallery.length} — ${item.name}`;
+  if (item.type === 'video') {
+    $('modalImage').removeAttribute('src');
+    $('modalImage').alt = 'Video file';
+  } else {
+    $('modalImage').src = item.url;
+  }
+  $('modalCaption').textContent = `${currentImage + 1} / ${gallery.length} — ${item.name}${item.type === 'video' ? ' — press edit to preview' : ''}`;
   $('modalThumbs').replaceChildren(...gallery.map((x, i) => makeThumb(x, i, true)));
   $('modalThumbs').children[currentImage]?.scrollIntoView({ inline: 'center', block: 'nearest' });
 }
@@ -104,6 +111,12 @@ $('galleryRow').addEventListener('wheel', (e) => {
   }
 }, { passive: false });
 $('closeGalleryModal').addEventListener('click', () => $('galleryModal').classList.add('hidden'));
+$('editImage').addEventListener('click', async () => {
+  const item = gallery[currentImage];
+  if (!item) return;
+  $('galleryModal').classList.add('hidden');
+  await window.betterSnip.openAnnotation(item.path);
+});
 $('prevImage').addEventListener('click', () => moveImage(-1));
 $('nextImage').addEventListener('click', () => moveImage(1));
 $('galleryModal').addEventListener('wheel', (e) => {

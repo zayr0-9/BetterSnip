@@ -11,6 +11,10 @@ let settingsWindow;
 let overlayWindows = [];
 let config;
 let foregroundAtSnip = null;
+let annotationWindow = null;
+let annotationFilePath = null;
+let recordingWindow = null;
+let recordingJob = null;
 
 app.setName('BetterSnip');
 if (process.platform === 'win32') app.setAppUserModelId('BetterSnip');
@@ -47,6 +51,52 @@ function createSettingsWindow(mode = 'settings') {
   });
   settingsWindow.loadFile(path.join(__dirname, 'renderer', 'settings.html'), { query: { mode } });
   settingsWindow.on('closed', () => { settingsWindow = null; });
+}
+
+function createAnnotationWindow(filePath) {
+  annotationFilePath = filePath;
+  if (annotationWindow) {
+    annotationWindow.show();
+    annotationWindow.focus();
+    annotationWindow.webContents.send('annotation:load', filePath);
+    return;
+  }
+  annotationWindow = new BrowserWindow({
+    width: 1000,
+    height: 720,
+    minWidth: 720,
+    minHeight: 480,
+    title: 'Annotate Screenshot',
+    frame: false,
+    webPreferences: { preload: path.join(__dirname, 'preload.js') }
+  });
+  annotationWindow.loadFile(path.join(__dirname, 'renderer', 'annotate.html'));
+  annotationWindow.once('ready-to-show', () => annotationWindow?.show());
+  annotationWindow.on('closed', () => { annotationWindow = null; annotationFilePath = null; });
+}
+
+function createRecordingWindow(job) {
+  recordingJob = job;
+  const controlH = 58;
+  recordingWindow = new BrowserWindow({
+    width: Math.max(160, Math.round(job.rect.width)),
+    height: Math.max(90, Math.round(job.rect.height + controlH)),
+    x: Math.round(job.rect.x),
+    y: Math.max(0, Math.round(job.rect.y - controlH)),
+    title: 'Recording',
+    frame: false,
+    transparent: true,
+    alwaysOnTop: true,
+    fullscreenable: false,
+    skipTaskbar: true,
+    resizable: false,
+    movable: false,
+    webPreferences: { preload: path.join(__dirname, 'preload.js') }
+  });
+  recordingWindow.setContentProtection(true);
+  recordingWindow.setAlwaysOnTop(true, 'screen-saver');
+  recordingWindow.loadFile(path.join(__dirname, 'renderer', 'recorder.html'));
+  recordingWindow.on('closed', () => { recordingWindow = null; });
 }
 
 function createTray() {
@@ -149,8 +199,6 @@ async function captureAndSave(rect) {
   const slug = buildForegroundSlug(foregroundAtSnip) || 'screenshot';
   const filePath = uniqueFilePath(config.saveDir, `${slug}-${timestamp()}`, ext);
   fs.writeFileSync(filePath, buffer);
-  if (config.copyToClipboard) clipboard.writeImage(cropped);
-  enqueueDescription(filePath, config);
   return filePath;
 }
 
@@ -167,15 +215,45 @@ ipcMain.handle('settings:openDir', () => {
   ensureSaveDir();
   shell.openPath(config.saveDir);
 });
+ipcMain.handle('annotation:open', (_, filePath) => {
+  if (!filePath || !fs.existsSync(filePath)) throw new Error('Capture not found.');
+  createAnnotationWindow(filePath);
+  return filePath;
+});
+ipcMain.handle('annotation:openFile', () => {
+  if (annotationFilePath) shell.openPath(annotationFilePath);
+});
+ipcMain.handle('annotation:getImage', () => {
+  if (!annotationFilePath) return null;
+  const stat = fs.existsSync(annotationFilePath) ? fs.statSync(annotationFilePath) : null;
+  return { path: annotationFilePath, name: path.basename(annotationFilePath), url: `${pathToFileURL(annotationFilePath).href}?v=${stat ? Math.round(stat.mtimeMs) : Date.now()}` };
+});
+ipcMain.handle('annotation:save', (_, dataUrl, saveAsCopy = false) => {
+  if (!annotationFilePath) throw new Error('No screenshot is open for annotation.');
+  const match = /^data:image\/(png|jpeg);base64,(.+)$/.exec(dataUrl);
+  if (!match) throw new Error('Invalid image data.');
+  const buffer = Buffer.from(match[2], 'base64');
+  const targetPath = saveAsCopy
+    ? uniqueFilePath(path.dirname(annotationFilePath), `${path.parse(annotationFilePath).name}-edited`, 'png')
+    : annotationFilePath;
+  fs.writeFileSync(targetPath, buffer);
+  if (config.copyToClipboard) clipboard.writeImage(nativeImage.createFromBuffer(buffer));
+  enqueueDescription(targetPath, config);
+  settingsWindow?.webContents.send('gallery:changed');
+  showSavedToast(targetPath);
+  return targetPath;
+});
+
 ipcMain.handle('gallery:list', () => {
   ensureSaveDir();
-  const exts = new Set(['.png', '.jpg', '.jpeg']);
+  const exts = new Set(['.png', '.jpg', '.jpeg', '.webm']);
   return fs.readdirSync(config.saveDir, { withFileTypes: true })
     .filter(d => d.isFile() && exts.has(path.extname(d.name).toLowerCase()))
     .map(d => {
       const filePath = path.join(config.saveDir, d.name);
       const stat = fs.statSync(filePath);
-      return { name: d.name, path: filePath, url: pathToFileURL(filePath).href, mtime: stat.mtimeMs };
+      const ext = path.extname(d.name).toLowerCase();
+      return { name: d.name, path: filePath, url: `${pathToFileURL(filePath).href}?v=${Math.round(stat.mtimeMs)}`, mtime: stat.mtimeMs, type: ext === '.webm' ? 'video' : 'image' };
     })
     .sort((a, b) => b.mtime - a.mtime);
 });
@@ -203,11 +281,52 @@ function closeOverlays() {
 }
 
 ipcMain.handle('snip:cancel', () => closeOverlays());
-ipcMain.handle('snip:capture', async (_, rect) => {
+ipcMain.handle('recording:getJob', () => recordingJob);
+ipcMain.handle('recording:stop', () => recordingWindow?.webContents.send('recording:stop'));
+ipcMain.handle('recording:cancel', () => { recordingJob = null; recordingWindow?.close(); closeOverlays(); });
+ipcMain.handle('recording:save', (_, buffer) => {
+  if (!recordingJob) throw new Error('No active recording.');
+  console.log('Saving recording bytes:', buffer?.byteLength || 0);
+  if (!buffer || buffer.byteLength < 100) throw new Error('Recording produced no video data.');
+  fs.writeFileSync(recordingJob.filePath, Buffer.from(buffer));
+  const filePath = recordingJob.filePath;
+  recordingJob = null;
+  settingsWindow?.webContents.send('gallery:changed');
+  showSavedToast(filePath);
+  setTimeout(() => createAnnotationWindow(filePath), 100);
+  return filePath;
+});
+ipcMain.handle('recording:prepare', async (_, rect) => {
+  if (process.platform !== 'win32') throw new Error('Video snip is Windows-only for now. macOS/Linux paths are reserved for future native handling.');
+  ensureSaveDir();
+  const display = screen.getDisplayMatching(rect);
+  const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 0, height: 0 } });
+  const source = sources.find(s => s.display_id === String(display.id)) || sources[0];
+  const slug = buildForegroundSlug(foregroundAtSnip) || 'recording';
+  const filePath = uniqueFilePath(config.saveDir, `${slug}-${timestamp()}`, 'webm');
+  const job = {
+    sourceId: source.id,
+    filePath,
+    rect,
+    displayBounds: display.bounds,
+    scaleFactor: display.scaleFactor,
+    crop: {
+      x: Math.round((rect.x - display.bounds.x) * display.scaleFactor),
+      y: Math.round((rect.y - display.bounds.y) * display.scaleFactor),
+      width: Math.round(rect.width * display.scaleFactor),
+      height: Math.round(rect.height * display.scaleFactor)
+    }
+  };
+  createRecordingWindow(job);
+  closeOverlays();
+  return filePath;
+});
+ipcMain.handle('snip:capture', async (_, rect, mode = 'image') => {
+  if (mode === 'video') throw new Error('Use recording:prepare for video snip.');
   const filePath = await captureAndSave(rect);
   closeOverlays();
   settingsWindow?.webContents.send('gallery:changed');
-  showSavedToast(filePath);
+  createAnnotationWindow(filePath);
   return filePath;
 });
 

@@ -11,5 +11,16 @@ contextBridge.exposeInMainWorld('betterSnip', {
   minimizeWindow: () => ipcRenderer.invoke('window:minimize'),
   closeWindow: () => ipcRenderer.invoke('window:close'),
   cancelSnip: () => ipcRenderer.invoke('snip:cancel'),
-  captureSnip: (rect) => ipcRenderer.invoke('snip:capture', rect)
+  captureSnip: (rect, mode = 'image') => ipcRenderer.invoke('snip:capture', rect, mode),
+  prepareRecording: (rect) => ipcRenderer.invoke('recording:prepare', rect),
+  getRecordingJob: () => ipcRenderer.invoke('recording:getJob'),
+  saveRecording: (buffer) => ipcRenderer.invoke('recording:save', buffer),
+  stopRecording: () => ipcRenderer.invoke('recording:stop'),
+  cancelRecording: () => ipcRenderer.invoke('recording:cancel'),
+  onRecordingStart: (callback) => ipcRenderer.on('recording:start', callback),
+  onRecordingStop: (callback) => ipcRenderer.on('recording:stop', callback),
+  getAnnotationImage: () => ipcRenderer.invoke('annotation:getImage'),
+  saveAnnotation: (dataUrl, saveAsCopy = false) => ipcRenderer.invoke('annotation:save', dataUrl, saveAsCopy),
+  openAnnotation: (filePath) => ipcRenderer.invoke('annotation:open', filePath),
+  openAnnotationFile: () => ipcRenderer.invoke('annotation:openFile')
 });
