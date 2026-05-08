@@ -21,4 +21,14 @@ pnpm install
 pnpm start
 ```
 
+## Development
+
+Run the app with renderer hot reload and main-process restart-on-change:
+
+```bash
+pnpm dev
+```
+
+`pnpm dev` starts the Vite dev server for renderer pages, watches/compiles the Electron main and preload scripts, and restarts Electron when the compiled main process changes.
+
 On first launch, choose the save folder. Change settings from the tray menu.

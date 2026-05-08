@@ -286,7 +286,6 @@ ipcMain.handle('recording:stop', () => recordingWindow?.webContents.send('record
 ipcMain.handle('recording:cancel', () => { recordingJob = null; recordingWindow?.close(); closeOverlays(); });
 ipcMain.handle('recording:save', (_, buffer) => {
   if (!recordingJob) throw new Error('No active recording.');
-  console.log('Saving recording bytes:', buffer?.byteLength || 0);
   if (!buffer || buffer.byteLength < 100) throw new Error('Recording produced no video data.');
   fs.writeFileSync(recordingJob.filePath, Buffer.from(buffer));
   const filePath = recordingJob.filePath;
@@ -318,7 +317,6 @@ ipcMain.handle('recording:prepare', async (_, rect) => {
     }
   };
   createRecordingWindow(job);
-  closeOverlays();
   return filePath;
 });
 ipcMain.handle('snip:capture', async (_, rect, mode = 'image') => {

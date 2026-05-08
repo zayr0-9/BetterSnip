@@ -122,6 +122,7 @@ recordBtn.addEventListener('click', async (e) => {
   stopBtn.className = 'rounded-full px-3 py-2 text-white hover:bg-white/15';
 
   await window.betterSnip.prepareRecording(absoluteRect(r));
+  await window.betterSnip.closeWindow();
 });
 
 stopBtn.addEventListener('click', async (e) => {

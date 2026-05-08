@@ -15,7 +15,7 @@ setInterval(() => {
 
 async function start() {
   const job = await window.betterSnip.getRecordingJob();
-  if (!job) throw new Error('No recording job found.');
+  if (!job || process.platform !== 'win32') throw new Error('Recording MVP is Windows-only for now.');
 
   mediaStream = await navigator.mediaDevices.getUserMedia({
     audio: false,
@@ -47,28 +47,23 @@ async function start() {
   recorder = new MediaRecorder(canvasStream, { mimeType });
   recorder.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
   recorder.onstop = async () => {
-    mediaStream?.getTracks().forEach(t => t.stop());
-    canvasStream?.getTracks().forEach(t => t.stop());
     const blob = new Blob(chunks, { type: 'video/webm' });
     const buffer = await blob.arrayBuffer();
     await window.betterSnip.saveRecording(buffer);
     window.betterSnip.closeWindow();
   };
-  recorder.start(250);
+  recorder.start();
 }
 
 function stop() {
   if (stopped) return;
   stopped = true;
   cancelAnimationFrame(raf);
-  if (recorder?.state === 'recording') {
-    recorder.requestData();
-    recorder.stop();
-  } else {
-    mediaStream?.getTracks().forEach(t => t.stop());
-    canvasStream?.getTracks().forEach(t => t.stop());
-    window.betterSnip.closeWindow();
-  }
+  if (recorder?.state === 'recording') recorder.requestData();
+  mediaStream?.getTracks().forEach(t => t.stop());
+  canvasStream?.getTracks().forEach(t => t.stop());
+  if (recorder?.state === 'recording') recorder.stop();
+  else window.betterSnip.closeWindow();
 }
 
 $('stop').addEventListener('click', stop);

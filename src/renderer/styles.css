@@ -1,0 +1,108 @@
+@import "tailwindcss";
+@source "./**/*.{html,ts,tsx}";
+
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+}
+
+.drag-region { -webkit-app-region: drag; }
+.no-drag { -webkit-app-region: no-drag; }
+
+button {
+  transition: scale 160ms ease, background-color 160ms ease, border-color 160ms ease, color 160ms ease, box-shadow 160ms ease, opacity 160ms ease, transform 160ms ease;
+}
+button:not(:disabled):hover { scale: 1.01; }
+button:not(:disabled):active { scale: .985; }
+button:disabled { cursor: not-allowed; }
+
+.settings-scroll,
+.gallery-scroll {
+  scrollbar-color: rgba(115, 115, 115, .55) transparent;
+  scrollbar-width: thin;
+}
+.gallery-scroll {
+  scroll-behavior: smooth;
+  scroll-padding-inline: 12px;
+  touch-action: pan-x;
+}
+.settings-scroll::-webkit-scrollbar { width: 16px; }
+.gallery-scroll::-webkit-scrollbar { height: 16px; }
+.settings-scroll::-webkit-scrollbar-track,
+.gallery-scroll::-webkit-scrollbar-track {
+  background: transparent;
+  border-radius: 999px;
+}
+.settings-scroll::-webkit-scrollbar-track-piece:start { margin-top: 8px; }
+.settings-scroll::-webkit-scrollbar-track-piece:end { margin-bottom: 8px; }
+.gallery-scroll::-webkit-scrollbar-track-piece:start { margin-left: 8px; }
+.gallery-scroll::-webkit-scrollbar-track-piece:end { margin-right: 8px; }
+.settings-scroll::-webkit-scrollbar-thumb,
+.gallery-scroll::-webkit-scrollbar-thumb {
+  background: rgba(115, 115, 115, .42);
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+}
+.settings-scroll::-webkit-scrollbar-thumb:hover,
+.gallery-scroll::-webkit-scrollbar-thumb:hover { background: rgba(82, 82, 82, .58); background-clip: padding-box; }
+.thumb-current { outline: 3px solid #2563eb; outline-offset: 2px; }
+.gallery-scroll > button { transition: transform 160ms ease, scale 160ms ease, box-shadow 160ms ease, opacity 160ms ease; }
+.gallery-scroll > button:hover { transform: translateY(-1px); scale: 1.012; }
+.gallery-scroll.is-scrolling > button { transform: scale(.985); opacity: .92; }
+.custom-select.open .custom-select-menu { opacity: 1; transform: translateY(0) scale(1); pointer-events: auto; }
+.custom-select.open .custom-select-chevron { transform: rotate(180deg); }
+.custom-select-option[aria-selected="true"] { background: #2563eb; color: white; }
+.custom-select-option[aria-selected="false"]:hover { background: #eff6ff; }
+
+.canvas-wrap .canvas-container { margin: auto; }
+.canvas-wrap canvas { border-radius: 12px; box-shadow: 0 2px 50px rgba(0,0,0,.05); }
+
+@media (prefers-reduced-motion: reduce) {
+  button, .gallery-scroll > button { transition: none !important; }
+  button, .gallery-scroll > button { scale: 1 !important; transform: none !important; }
+}
+
+@media (prefers-color-scheme: dark) {
+  :root { color-scheme: dark; }
+  .settings-page { background:#181818 !important; color:#f5f5f5 !important; }
+  .settings-page header:not(.transparent-titlebar) { background:#101010 !important; border-color:#2f2f2f !important; }
+  .settings-page .transparent-titlebar, .annotate-page .transparent-titlebar { background:transparent !important; border-color:transparent !important; box-shadow:none !important; }
+  .settings-page main > section, .settings-page details, .settings-page .bg-white, .settings-page .bg-white\/70, .settings-page .bg-white\/80, .settings-page .bg-white\/95 { background:#181818 !important; border-color:#3a3a3a !important; box-shadow:none !important; }
+  .settings-page .bg-slate-50, .settings-page input, .settings-page select, .settings-page textarea, .settings-page #imageFormatButton, .settings-page #imageFormatMenu { background:#242424 !important; border-color:#454545 !important; color:#f5f5f5 !important; }
+  .settings-page .bg-slate-100, .settings-page .bg-slate-200 { background:#303030 !important; }
+  .settings-page .text-slate-950, .settings-page .text-slate-900, .settings-page .text-slate-800, .settings-page .text-slate-700 { color:#f5f5f5 !important; }
+  .settings-page .text-slate-600, .settings-page .text-slate-500, .settings-page .text-slate-400 { color:#d0d0d0 !important; }
+  .settings-page .border-slate-200, .settings-page .border-slate-300 { border-color:#3a3a3a !important; }
+  .settings-page .hover\:bg-slate-50:hover, .settings-page .hover\:bg-slate-100:hover, .settings-page .hover\:bg-slate-200:hover, .settings-page .hover\:bg-slate-300:hover { background:#303030 !important; }
+  .settings-page .bg-blue-50 { background:#242424 !important; }
+  .settings-page .bg-blue-600, .settings-page .hover\:bg-blue-700:hover { background:#2b2b2b !important; }
+  .settings-page .hover\:bg-blue-50:hover, .settings-page .hover\:bg-blue-50\/40:hover { background:#303030 !important; }
+  .settings-page .border-blue-100, .settings-page .border-blue-600, .settings-page .hover\:border-blue-300:hover { border-color:#555 !important; }
+  .settings-page .shadow-blue-600\/20, .settings-page .shadow-blue-600\/25 { box-shadow:none !important; }
+  .settings-page .text-blue-600, .settings-page .hover\:text-blue-700:hover { color:#d0d0d0 !important; }
+  .settings-page .focus\:ring-blue-500:focus { --tw-ring-color:#666 !important; }
+  .settings-page input.accent-blue-600 { accent-color:#666 !important; }
+  .settings-page .custom-select-option[aria-selected="true"] { background:#303030 !important; color:#f5f5f5 !important; }
+  .settings-page .custom-select-option[aria-selected="false"]:hover { background:#383838 !important; }
+  .settings-page .thumb-current { outline-color:#666 !important; }
+  .settings-page .bg-emerald-50 { background:#242424 !important; }
+  .settings-page .border-emerald-100 { border-color:#555 !important; }
+  .settings-page code { color:#e5e5e5; }
+}
+
+@media (prefers-color-scheme: dark) {
+  .settings-page .delete-confirm-card { background:#181818 !important; border-color:rgba(255,255,255,.1) !important; color:#fff !important; }
+  .settings-page .delete-confirm-card .text-slate-600 { color:#cbd5e1 !important; }
+
+  .annotate-page { background:transparent !important; color:#fff !important; }
+  .annotate-page header.transparent-titlebar { background:transparent !important; border-color:transparent !important; }
+  .annotate-page header:not(.transparent-titlebar), .annotate-page section, .annotate-page section > div:first-child { background:#181818 !important; border-color:rgba(255,255,255,.1) !important; }
+  .annotate-page .bg-slate-50 { background:#181818 !important; }
+  .annotate-page .bg-white\/90 { background:#181818 !important; }
+  .annotate-page .bg-slate-100 { background:rgba(255,255,255,.1) !important; }
+  .annotate-page .hover\:bg-slate-100:hover, .annotate-page .hover\:bg-slate-200:hover { background:rgba(255,255,255,.2) !important; }
+}
