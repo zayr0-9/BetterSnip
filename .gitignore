@@ -10,6 +10,7 @@ build/
 out/
 release/
 *.asar
+*.asar-tmp-audit
 
 # Logs
 *.log
