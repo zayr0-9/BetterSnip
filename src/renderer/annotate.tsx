@@ -3,10 +3,11 @@ import { createRoot } from "react-dom/client";
 import "./styles.css";
 import type { CaptureInfo } from "../types";
 import { Icons } from "./components/Icons";
+import { TitleBar } from "./components/TitleBar";
 import { Canvas, FabricImage, Image as LegacyImage, PencilBrush } from "fabric";
 
 const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg"]);
-const VIDEO_EXTS = new Set([".webm"]);
+const VIDEO_EXTS = new Set([".webm", ".mp4"]);
 function extOf(name: string) {
   const i = name.lastIndexOf(".");
   return i >= 0 ? name.slice(i).toLowerCase() : "";
@@ -45,59 +46,29 @@ function AnnotateApp() {
   }, [view]);
   return (
     <div className="annotate-page h-screen bg-transparent text-neutral-900 flex flex-col overflow-hidden">
-      <header className="transparent-titlebar drag-region h-12 shrink-0 flex items-center justify-between border-b border-transparent bg-transparent px-4 shadow-none">
-        <div className="font-semibold truncate">
-          {view === "video" ? "Video preview" : "Annotate screenshot"}
-        </div>
-        <WindowButtons />
-      </header>
+      <TitleBar title={view === "video" ? "Video preview" : "Annotate screenshot"} />
       {view === "image" && info && <ImageEditor info={info} />}
       {view === "video" && info && <VideoView info={info} />}
     </div>
   );
 }
 
-function WindowButtons() {
-  return (
-    <div className="no-drag flex items-center gap-1">
-      <button
-        onClick={() => window.betterSnip.minimizeWindow()}
-        className="grid h-8 w-10 place-items-center rounded-lg hover:bg-neutral-200/50"
-      >
-        <Icons.Minimize />
-      </button>
-      <button
-        onClick={() => window.betterSnip.maximizeWindow()}
-        className="grid h-8 w-10 place-items-center rounded-lg hover:bg-neutral-200/50"
-      >
-        <Icons.Maximize />
-      </button>
-      <button
-        onClick={() => window.betterSnip.closeWindow()}
-        className="grid h-8 w-10 place-items-center rounded-lg hover:bg-red-500 hover:text-white"
-      >
-        <Icons.Close />
-      </button>
-    </div>
-  );
-}
-
 function VideoView({ info }: { info: CaptureInfo }) {
   return (
-    <section className="min-h-0 flex-1 flex flex-col bg-slate-50">
-      <div className="shrink-0 flex items-center gap-3 border-b border-slate-200 bg-white/90 px-4 py-3">
+    <section className="min-h-0 flex-1 flex flex-col bg-neutral-50">
+      <div className="shrink-0 flex items-center gap-3 border-b border-neutral-200 bg-white/90 px-4 py-3">
         <div className="text-sm font-semibold">Video preview</div>
         <div className="grow" />
         <button
           onClick={() => window.betterSnip.openAnnotationFile()}
-          className="inline-flex items-center gap-2 rounded-xl bg-slate-100 hover:bg-slate-200 px-4 py-2 text-sm font-medium"
+          className="inline-flex items-center gap-2 rounded-xl bg-neutral-100 hover:bg-neutral-200 px-4 py-2 text-sm font-medium"
         >
           <Icons.External />
           Open file
         </button>
         <button
           onClick={() => window.betterSnip.closeWindow()}
-          className="inline-flex items-center gap-2 rounded-xl bg-blue-600 hover:bg-blue-700 px-5 py-2 text-sm font-semibold"
+          className="inline-flex items-center gap-2 rounded-xl bg-neutral-800 hover:bg-neutral-900 px-5 py-2 text-sm font-semibold text-white"
         >
           <Icons.Check />
           Done
@@ -296,7 +267,7 @@ function ToolbarButton({
   return (
     <button
       onClick={onClick}
-      className={`inline-flex items-center gap-2 rounded-xl bg-slate-100 hover:bg-slate-200 px-4 py-2 text-sm ${strong ? "font-semibold" : "font-medium"}`}
+      className={`inline-flex items-center gap-2 rounded-xl bg-neutral-100 hover:bg-neutral-200 px-4 py-2 text-sm ${strong ? "font-semibold" : "font-medium"}`}
     >
       {children}
     </button>

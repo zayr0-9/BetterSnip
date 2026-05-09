@@ -1,6 +1,6 @@
 import fs from "fs";
 import path from "path";
-import { pathToFileURL } from "url";
+import { Readable } from "stream";
 import {
   app,
   BrowserWindow,
@@ -9,7 +9,6 @@ import {
   globalShortcut,
   ipcMain,
   dialog,
-  desktopCapturer,
   screen,
   clipboard,
   nativeImage,
@@ -21,6 +20,8 @@ import {
 import { loadConfig, saveConfig } from "./config";
 import { getForegroundApp, buildForegroundSlug } from "./platform/foreground";
 import { enqueueDescription, startDescriptionQueue } from "./llm/lmstudio";
+import { captureNativeScreenshot } from "./nativeCapture";
+import { cancelNativeRecording, startNativeRecording, stopNativeRecording } from "./nativeRecorder";
 import type { AppConfig, ForegroundInfo, RecordingJob, Rect } from "./types";
 
 let tray: Tray | undefined;
@@ -30,7 +31,8 @@ let config: AppConfig;
 let foregroundAtSnip: ForegroundInfo | null = null;
 let annotationWindow: BrowserWindow | null = null;
 let annotationFilePath: string | null = null;
-let recordingWindow: BrowserWindow | null = null;
+let recordingControlsWindow: BrowserWindow | null = null;
+let recordingBorderWindow: BrowserWindow | null = null;
 let recordingJob: RecordingJob | null = null;
 let snipStarting = false;
 
@@ -47,10 +49,15 @@ protocol.registerSchemesAsPrivileged([
 ]);
 
 app.setName("BetterSnip");
-if (process.platform === "win32") app.setAppUserModelId("BetterSnip");
+if (process.platform === "win32") app.setAppUserModelId("com.bettersnip.app");
 
 const isDev = !app.isPackaged;
 const devServerUrl = process.env.VITE_DEV_SERVER_URL;
+const appIconPath = path.resolve(__dirname, "..", "build", "icon.ico");
+
+function appIcon(): Electron.NativeImage {
+  return nativeImage.createFromPath(appIconPath);
+}
 
 function rendererUrl(
   page: string,
@@ -120,6 +127,7 @@ function createSettingsWindow(mode = "settings"): void {
     title: "BetterSnip Settings",
     frame: false,
     backgroundMaterial: "mica",
+    icon: appIcon(),
     webPreferences: { preload: path.join(__dirname, "preload.js") },
   });
   loadRendererPage(settingsWindow, "settings.html", { mode });
@@ -149,10 +157,14 @@ function createAnnotationWindow(filePath: string): void {
     title: "Annotate Screenshot",
     frame: false,
     backgroundMaterial: "mica",
+    icon: appIcon(),
     webPreferences: { preload: path.join(__dirname, "preload.js") },
   });
   loadRendererPage(annotationWindow, "annotate.html");
-  annotationWindow.once("ready-to-show", () => annotationWindow?.show());
+  annotationWindow.once("ready-to-show", () => {
+    annotationWindow?.show();
+    annotationWindow?.focus();
+  });
   annotationWindow.on("closed", () => {
     annotationWindow = null;
     annotationFilePath = null;
@@ -161,13 +173,39 @@ function createAnnotationWindow(filePath: string): void {
 
 function createRecordingWindow(job: RecordingJob): void {
   recordingJob = job;
-  const controlH = 58;
-  recordingWindow = new BrowserWindow({
-    width: Math.max(160, Math.round(job.rect.width)),
-    height: Math.max(90, Math.round(job.rect.height + controlH)),
+  const controlW = 170;
+  const controlH = 52;
+
+  recordingBorderWindow = new BrowserWindow({
+    width: Math.max(1, Math.round(job.rect.width)),
+    height: Math.max(1, Math.round(job.rect.height)),
     x: Math.round(job.rect.x),
-    y: Math.max(0, Math.round(job.rect.y - controlH)),
-    title: "Recording",
+    y: Math.round(job.rect.y),
+    title: "Recording Border",
+    frame: false,
+    transparent: true,
+    alwaysOnTop: true,
+    fullscreenable: false,
+    skipTaskbar: true,
+    resizable: false,
+    movable: false,
+    focusable: false,
+    webPreferences: { preload: path.join(__dirname, "preload.js") },
+  });
+  recordingBorderWindow.setContentProtection(true);
+  recordingBorderWindow.setAlwaysOnTop(true, "screen-saver");
+  recordingBorderWindow.setIgnoreMouseEvents(true, { forward: true });
+  loadRendererPage(recordingBorderWindow, "recorder.html", { view: "border" });
+  recordingBorderWindow.on("closed", () => {
+    recordingBorderWindow = null;
+  });
+
+  recordingControlsWindow = new BrowserWindow({
+    width: controlW,
+    height: controlH,
+    x: Math.round(job.rect.x + job.rect.width / 2 - controlW / 2),
+    y: Math.max(0, Math.round(job.rect.y - controlH - 6)),
+    title: "Recording Controls",
     frame: false,
     transparent: true,
     alwaysOnTop: true,
@@ -177,16 +215,16 @@ function createRecordingWindow(job: RecordingJob): void {
     movable: false,
     webPreferences: { preload: path.join(__dirname, "preload.js") },
   });
-  recordingWindow.setContentProtection(true);
-  recordingWindow.setAlwaysOnTop(true, "screen-saver");
-  loadRendererPage(recordingWindow, "recorder.html");
-  recordingWindow.on("closed", () => {
-    recordingWindow = null;
+  recordingControlsWindow.setContentProtection(true);
+  recordingControlsWindow.setAlwaysOnTop(true, "screen-saver");
+  loadRendererPage(recordingControlsWindow, "recorder.html", { view: "controls" });
+  recordingControlsWindow.on("closed", () => {
+    recordingControlsWindow = null;
   });
 }
 
 function createTray(): void {
-  tray = new Tray(nativeImage.createEmpty());
+  tray = new Tray(appIcon());
   tray.setToolTip("BetterSnip");
   tray.setContextMenu(
     Menu.buildFromTemplate([
@@ -226,12 +264,11 @@ function applyAutoStart(enabled: boolean): void {
 
 async function startSnip(): Promise<void> {
   if (snipStarting) return;
-  snipStarting = true;
+
   overlayWindows = overlayWindows.filter((w) => !w.isDestroyed());
-  if (overlayWindows.length) {
-    closeOverlays();
-    await sleep(80);
-  }
+  if (overlayWindows.length) return;
+
+  snipStarting = true;
   foregroundAtSnip = await getForegroundApp();
 
   overlayWindows = screen.getAllDisplays().map((display) => {
@@ -243,7 +280,8 @@ async function startSnip(): Promise<void> {
       frame: false,
       transparent: true,
       alwaysOnTop: true,
-      fullscreenable: false,
+      fullscreen: true,
+      fullscreenable: true,
       skipTaskbar: true,
       resizable: false,
       movable: false,
@@ -251,6 +289,7 @@ async function startSnip(): Promise<void> {
       webPreferences: { preload: path.join(__dirname, "preload.js") },
     });
     win.setAlwaysOnTop(true, "screen-saver");
+    win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
     loadRendererPage(win, "overlay.html", {
       x: String(display.bounds.x),
       y: String(display.bounds.y),
@@ -259,6 +298,9 @@ async function startSnip(): Promise<void> {
     });
     win.once("ready-to-show", () => {
       win.show();
+      win.setFullScreen(true);
+      win.setAlwaysOnTop(true, "screen-saver");
+      win.moveTop();
       win.focus();
     });
     win.on("closed", () => {
@@ -266,7 +308,9 @@ async function startSnip(): Promise<void> {
     });
     return win;
   });
-  snipStarting = false;
+  setTimeout(() => {
+    snipStarting = false;
+  }, 500);
 }
 
 function sleep(ms: number): Promise<void> {
@@ -304,50 +348,28 @@ async function captureAndSave(rect: Rect): Promise<string> {
   }
   await sleep(300);
 
+  if (process.platform !== "win32")
+    throw new Error("Screenshot capture currently requires Windows.Graphics.Capture on Windows.");
+
   const display = screen.getDisplayMatching(rect);
-  const requestedWidth = Math.max(
-    1,
-    Math.ceil(display.bounds.width * display.scaleFactor),
-  );
-  const requestedHeight = Math.max(
-    1,
-    Math.ceil(display.bounds.height * display.scaleFactor),
-  );
-  const sources = await desktopCapturer.getSources({
-    types: ["screen"],
-    thumbnailSize: { width: requestedWidth, height: requestedHeight },
-  });
-  const source =
-    sources.find((s) => s.display_id === String(display.id)) || sources[0];
-  if (!source || source.thumbnail.isEmpty())
-    throw new Error("Could not capture the selected screen.");
-
-  const img = source.thumbnail;
-  const imgSize = img.getSize();
-  const scaleX = imgSize.width / display.bounds.width;
-  const scaleY = imgSize.height / display.bounds.height;
+  const displays = screen.getAllDisplays();
+  const monitorIndex = Math.max(0, displays.findIndex((d) => d.id === display.id));
   const crop = {
-    x: Math.max(0, Math.floor((rect.x - display.bounds.x) * scaleX)),
-    y: Math.max(0, Math.floor((rect.y - display.bounds.y) * scaleY)),
-    width: Math.max(1, Math.ceil(rect.width * scaleX)),
-    height: Math.max(1, Math.ceil(rect.height * scaleY)),
+    x: Math.max(0, Math.round((rect.x - display.bounds.x) * display.scaleFactor)),
+    y: Math.max(0, Math.round((rect.y - display.bounds.y) * display.scaleFactor)),
+    width: Math.max(1, Math.round(rect.width * display.scaleFactor)),
+    height: Math.max(1, Math.round(rect.height * display.scaleFactor)),
   };
-  crop.width = Math.min(crop.width, imgSize.width - crop.x);
-  crop.height = Math.min(crop.height, imgSize.height - crop.y);
-  if (crop.width < 1 || crop.height < 1)
-    throw new Error("Screenshot selection is outside the captured screen.");
-
-  const cropped = img.crop(crop);
   const ext = config.imageFormat === "jpg" ? "jpg" : "png";
-  const buffer = ext === "jpg" ? cropped.toJPEG(92) : cropped.toPNG();
   const slug = buildForegroundSlug(foregroundAtSnip) || "screenshot";
-  const filePath = uniqueFilePath(
-    config.saveDir,
-    `${slug}-${timestamp()}`,
-    ext,
-  );
-  fs.writeFileSync(filePath, buffer);
-  if (config.copyToClipboard) clipboard.writeImage(cropped);
+  const filePath = uniqueFilePath(config.saveDir, `${slug}-${timestamp()}`, ext);
+
+  await captureNativeScreenshot({ filePath, rect: crop, monitorIndex, format: ext });
+
+  if (config.copyToClipboard) {
+    const image = nativeImage.createFromPath(filePath);
+    if (!image.isEmpty()) clipboard.writeImage(image);
+  }
   return filePath;
 }
 
@@ -414,7 +436,7 @@ ipcMain.handle("annotation:save", (_, dataUrl, saveAsCopy = false) => {
 
 ipcMain.handle("gallery:list", () => {
   ensureSaveDir();
-  const exts = new Set([".png", ".jpg", ".jpeg", ".webm"]);
+  const exts = new Set([".png", ".jpg", ".jpeg", ".webm", ".mp4"]);
   return fs
     .readdirSync(config.saveDir, { withFileTypes: true })
     .filter((d) => d.isFile() && exts.has(path.extname(d.name).toLowerCase()))
@@ -427,7 +449,7 @@ ipcMain.handle("gallery:list", () => {
         path: filePath,
         url: mediaUrl(filePath, Math.round(stat.mtimeMs)),
         mtime: stat.mtimeMs,
-        type: ext === ".webm" ? "video" : "image",
+        type: ext === ".webm" || ext === ".mp4" ? "video" : "image",
       };
     })
     .sort((a, b) => b.mtime - a.mtime);
@@ -441,7 +463,7 @@ ipcMain.handle("gallery:delete", (_, filePath) => {
   if (path.dirname(target) !== saveDir)
     throw new Error("Cannot delete files outside the save folder.");
   const ext = path.extname(target).toLowerCase();
-  if (![".png", ".jpg", ".jpeg", ".webm"].includes(ext))
+  if (![".png", ".jpg", ".jpeg", ".webm", ".mp4"].includes(ext))
     throw new Error("Unsupported capture type.");
   if (!fs.existsSync(target)) throw new Error("Capture not found.");
   fs.unlinkSync(target);
@@ -486,12 +508,22 @@ function closeOverlays(): void {
 
 ipcMain.handle("snip:cancel", () => closeOverlays());
 ipcMain.handle("recording:getJob", () => recordingJob);
-ipcMain.handle("recording:stop", () =>
-  recordingWindow?.webContents.send("recording:stop"),
-);
-ipcMain.handle("recording:cancel", () => {
+ipcMain.handle("recording:stop", async () => {
+  const filePath = await stopNativeRecording();
+  recordingControlsWindow?.close();
+  recordingBorderWindow?.close();
   recordingJob = null;
-  recordingWindow?.close();
+  if (filePath && fs.existsSync(filePath) && fs.statSync(filePath).size > 0) {
+    settingsWindow?.webContents.send("gallery:changed");
+    showSavedToast(filePath);
+    setTimeout(() => createAnnotationWindow(filePath), 100);
+  }
+});
+ipcMain.handle("recording:cancel", () => {
+  cancelNativeRecording();
+  recordingJob = null;
+  recordingControlsWindow?.close();
+  recordingBorderWindow?.close();
   closeOverlays();
 });
 ipcMain.handle("recording:save", (_, buffer) => {
@@ -514,31 +546,30 @@ ipcMain.handle("recording:prepare", async (_, rect) => {
     );
   ensureSaveDir();
   const display = screen.getDisplayMatching(rect);
-  const sources = await desktopCapturer.getSources({
-    types: ["screen"],
-    thumbnailSize: { width: 0, height: 0 },
-  });
-  const source =
-    sources.find((s) => s.display_id === String(display.id)) || sources[0];
+  const displays = screen.getAllDisplays();
+  const monitorIndex = Math.max(0, displays.findIndex((d) => d.id === display.id));
   const slug = buildForegroundSlug(foregroundAtSnip) || "recording";
   const filePath = uniqueFilePath(
     config.saveDir,
     `${slug}-${timestamp()}`,
-    "webm",
+    "mp4",
   );
+  const crop = {
+    x: Math.round((rect.x - display.bounds.x) * display.scaleFactor),
+    y: Math.round((rect.y - display.bounds.y) * display.scaleFactor),
+    width: Math.round(rect.width * display.scaleFactor),
+    height: Math.round(rect.height * display.scaleFactor),
+  };
   const job = {
-    sourceId: source.id,
+    sourceId: "native-wgc",
     filePath,
     rect,
     displayBounds: display.bounds,
     scaleFactor: display.scaleFactor,
-    crop: {
-      x: Math.round((rect.x - display.bounds.x) * display.scaleFactor),
-      y: Math.round((rect.y - display.bounds.y) * display.scaleFactor),
-      width: Math.round(rect.width * display.scaleFactor),
-      height: Math.round(rect.height * display.scaleFactor),
-    },
+    crop,
   };
+  recordingJob = job;
+  await startNativeRecording({ filePath, rect: crop, monitorIndex, fps: 30, bitrate: 8_000_000 });
   createRecordingWindow(job);
   closeOverlays();
   return filePath;
@@ -564,7 +595,53 @@ app.whenReady().then(() => {
   protocol.handle("bettersnip-file", (request) => {
     const encodedPath = new URL(request.url).pathname.slice(1);
     const filePath = Buffer.from(encodedPath, "base64url").toString("utf8");
-    return net.fetch(pathToFileURL(filePath).toString());
+    const stat = fs.existsSync(filePath) ? fs.statSync(filePath) : null;
+    if (!stat?.isFile()) return new Response("Not found", { status: 404 });
+
+    const ext = path.extname(filePath).toLowerCase();
+    const type =
+      ext === ".webm"
+        ? "video/webm"
+        : ext === ".mp4"
+          ? "video/mp4"
+          : ext === ".png"
+            ? "image/png"
+          : ext === ".jpg" || ext === ".jpeg"
+            ? "image/jpeg"
+            : "application/octet-stream";
+    const range = request.headers.get("range");
+    const makeHeaders = (status: number, extra: Record<string, string> = {}) =>
+      new Headers({
+        "Content-Type": type,
+        "Accept-Ranges": "bytes",
+        "Cache-Control": "no-store",
+        ...extra,
+      });
+
+    if (range) {
+      const match = /^bytes=(\d*)-(\d*)$/.exec(range);
+      if (!match) return new Response(null, { status: 416 });
+      const start = match[1] ? Number(match[1]) : 0;
+      const end = match[2]
+        ? Math.min(Number(match[2]), stat.size - 1)
+        : stat.size - 1;
+      if (start > end || start >= stat.size)
+        return new Response(null, {
+          status: 416,
+          headers: makeHeaders(416, { "Content-Range": `bytes */${stat.size}` }),
+        });
+      return new Response(Readable.toWeb(fs.createReadStream(filePath, { start, end })) as BodyInit, {
+        status: 206,
+        headers: makeHeaders(206, {
+          "Content-Length": String(end - start + 1),
+          "Content-Range": `bytes ${start}-${end}/${stat.size}`,
+        }),
+      });
+    }
+
+    return new Response(Readable.toWeb(fs.createReadStream(filePath)) as BodyInit, {
+      headers: makeHeaders(200, { "Content-Length": String(stat.size) }),
+    });
   });
 
   config = loadConfig();

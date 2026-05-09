@@ -44,12 +44,17 @@ export const Icons = {
     </Icon>
   ),
   Scissors: (p: { className?: string }) => (
-    <Icon {...p}>
-      <circle cx="6" cy="6" r="3" />
-      <circle cx="6" cy="18" r="3" />
-      <path d="M20 4 8.12 15.88" />
-      <path d="M14.47 14.48 20 20" />
-      <path d="M8.12 8.12 12 12" />
+    <Icon {...p} viewBox="0 0 64 64" fill="none">
+      <rect x="4" y="4" width="56" height="56" rx="14" fill="#ff2f36" stroke="none" />
+      <path d="M18 25v-4a4 4 0 0 1 4-4h6" stroke="white" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M34 17h6" stroke="white" strokeWidth="4" strokeLinecap="round" />
+      <path d="M44 17a4 4 0 0 1 4 4v6" stroke="white" strokeWidth="4" strokeLinecap="round" />
+      <path d="M18 31v6" stroke="white" strokeWidth="4" strokeLinecap="round" />
+      <path d="M18 43a4 4 0 0 0 4 4h6" stroke="white" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M34 47h6" stroke="white" strokeWidth="4" strokeLinecap="round" />
+      <path d="M48 33v4" stroke="white" strokeWidth="4" strokeLinecap="round" />
+      <path d="M48 39v14" stroke="white" strokeWidth="4" strokeLinecap="round" />
+      <path d="M41 46h14" stroke="white" strokeWidth="4" strokeLinecap="round" />
     </Icon>
   ),
   Folder: (p: { className?: string }) => (

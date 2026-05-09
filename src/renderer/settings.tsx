@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import "./styles.css";
 import type { AppConfig, CaptureInfo, ImageFormat } from "../types";
 import { Icons } from "./components/Icons";
+import { TitleBar } from "./components/TitleBar";
 
 const defaultLm = {
   enabled: false,
@@ -21,42 +22,6 @@ const defaultSettings: AppConfig = {
   onboardingComplete: false,
   lmStudio: defaultLm,
 };
-
-function TitleBar() {
-  return (
-    <header className="drag-region h-14 shrink-0 flex items-center justify-between bg-white/95 border-b border-slate-200 shadow-sm">
-      <div className="px-4 flex items-center gap-2 text-sm font-semibold">
-        <span className="grid h-8 w-8 place-items-center rounded-xl bg-blue-600 text-white shadow-lg shadow-blue-600/25">
-          <Icons.Scissors />
-        </span>
-        <span>BetterSnip</span>
-      </div>
-      <div className="no-drag flex h-full">
-        <button
-          onClick={() => window.betterSnip.minimizeWindow()}
-          title="Minimize"
-          className="grid w-12 place-items-center hover:bg-slate-100 text-slate-600"
-        >
-          <Icons.Minimize />
-        </button>
-        <button
-          onClick={() => window.betterSnip.maximizeWindow()}
-          title="Maximize"
-          className="grid w-12 place-items-center hover:bg-slate-100 text-slate-600"
-        >
-          <Icons.Maximize />
-        </button>
-        <button
-          onClick={() => window.betterSnip.closeWindow()}
-          title="Close"
-          className="grid w-12 place-items-center hover:bg-red-500 text-slate-600 hover:text-white"
-        >
-          <Icons.Close />
-        </button>
-      </div>
-    </header>
-  );
-}
 
 function Thumb({
   item,
@@ -308,8 +273,8 @@ function SettingsApp() {
   }
 
   return (
-    <div className="settings-page bg-slate-50 text-slate-900 h-screen overflow-hidden flex flex-col">
-      <TitleBar />
+    <div className="settings-page bg-transparent text-neutral-900 h-screen overflow-hidden flex flex-col">
+      <TitleBar title="BetterSnip" />
       <main className="flex-1 min-h-0 overflow-y-auto">
         {!isOnboarding ? (
           <section className="mx-auto w-full max-w-[1120px] px-3 py-7 sm:px-6 sm:py-8 space-y-8">
@@ -322,9 +287,18 @@ function SettingsApp() {
               </p>
             </div>
             <section className="space-y-4">
-              <label className="text-base font-semibold text-slate-800">
-                Save folder
-              </label>
+              <div className="flex items-center gap-3 pb-2">
+                <label className="text-base font-semibold text-slate-800">
+                  Save folder
+                </label>
+                <button
+                  onClick={() => window.betterSnip.openDir()}
+                  className="inline-flex h-9 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white shadow-lg shadow-blue-600/20 hover:bg-blue-700"
+                >
+                  <Icons.Image className="h-4 w-4" />
+                  Browse Gallery
+                </button>
+              </div>
               <div className="grid grid-cols-[56px_1fr_auto] items-center gap-4">
                 <div className="grid h-11 w-11 place-items-center rounded-full bg-blue-50 text-blue-600">
                   <Icons.Folder className="h-6 w-6" />
@@ -341,13 +315,6 @@ function SettingsApp() {
                   Change
                 </button>
               </div>
-              <button
-                onClick={() => window.betterSnip.openDir()}
-                className="inline-flex h-12 w-full items-center justify-center gap-3 rounded-xl bg-blue-600 px-4 text-base font-semibold text-white shadow-lg shadow-blue-600/20 hover:bg-blue-700"
-              >
-                <Icons.Image className="h-5 w-5" />
-                Browse Gallery
-              </button>
             </section>
             <section className="space-y-5">
               <div className="flex items-center justify-between">
@@ -370,7 +337,7 @@ function SettingsApp() {
                 </button>
                 <div
                   ref={rowRef}
-                  className="gallery-scroll flex min-h-[118px] gap-5 overflow-x-auto overscroll-contain px-2 py-1"
+                  className="gallery-scroll flex min-h-[118px] gap-5 overflow-x-auto overscroll-contain px-2 pt-1 pb-4"
                   onScroll={updateThumbPages}
                 >
                   {gallery.slice(0, 30).map((g, i) => (
@@ -407,7 +374,7 @@ function SettingsApp() {
             </section>
             <section className="grid grid-cols-1 gap-7 lg:grid-cols-[1fr_1fr]">
               <div className="space-y-3">
-                <label className="text-base font-semibold text-slate-800">
+                <label className="block pb-2 text-base font-semibold text-slate-800">
                   Global hotkey
                 </label>
                 <input
@@ -422,7 +389,7 @@ function SettingsApp() {
               </div>
               <div></div>
               <div className="space-y-3">
-                <label className="text-base font-semibold text-slate-800">
+                <label className="block pb-2 text-base font-semibold text-slate-800">
                   Image format
                 </label>
                 <div
@@ -490,7 +457,7 @@ function SettingsApp() {
                 </span>
                 <Icons.ChevronDown className="h-5 w-5 transition group-open:rotate-180" />
               </summary>
-              <div className="mt-5 space-y-4 rounded-2xl border border-slate-200 bg-white/70 p-4">
+              <div className="mt-5 space-y-4 rounded-2xl border border-slate-200 bg-transparent p-4">
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <p className="text-sm font-medium text-slate-800">
@@ -763,7 +730,7 @@ function SettingsApp() {
               <div
                 ref={modalThumbsRef}
                 onWheel={(e) => e.stopPropagation()}
-                className="gallery-scroll flex gap-3 overflow-x-auto overscroll-contain px-[45%] py-2"
+                className="gallery-scroll flex gap-3 overflow-x-auto overscroll-contain px-[45%] pt-2 pb-4"
               >
                 {gallery.map((g, i) => (
                   <Thumb

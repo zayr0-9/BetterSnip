@@ -30,7 +30,7 @@ button:disabled { cursor: not-allowed; }
   touch-action: pan-x;
 }
 .settings-scroll::-webkit-scrollbar { width: 16px; }
-.gallery-scroll::-webkit-scrollbar { height: 16px; }
+.gallery-scroll::-webkit-scrollbar { height: 22px; }
 .settings-scroll::-webkit-scrollbar-track,
 .gallery-scroll::-webkit-scrollbar-track {
   background: transparent;
@@ -68,10 +68,10 @@ button:disabled { cursor: not-allowed; }
 
 @media (prefers-color-scheme: dark) {
   :root { color-scheme: dark; }
-  .settings-page { background:#181818 !important; color:#f5f5f5 !important; }
+  .settings-page { background:transparent !important; color:#f5f5f5 !important; }
   .settings-page header:not(.transparent-titlebar) { background:#101010 !important; border-color:#2f2f2f !important; }
   .settings-page .transparent-titlebar, .annotate-page .transparent-titlebar { background:transparent !important; border-color:transparent !important; box-shadow:none !important; }
-  .settings-page main > section, .settings-page details, .settings-page .bg-white, .settings-page .bg-white\/70, .settings-page .bg-white\/80, .settings-page .bg-white\/95 { background:#181818 !important; border-color:#3a3a3a !important; box-shadow:none !important; }
+  .settings-page .bg-white, .settings-page .bg-white\/70, .settings-page .bg-white\/80, .settings-page .bg-white\/95 { background:#181818 !important; border-color:#3a3a3a !important; box-shadow:none !important; }
   .settings-page .bg-slate-50, .settings-page input, .settings-page select, .settings-page textarea, .settings-page #imageFormatButton, .settings-page #imageFormatMenu { background:#242424 !important; border-color:#454545 !important; color:#f5f5f5 !important; }
   .settings-page .bg-slate-100, .settings-page .bg-slate-200 { background:#303030 !important; }
   .settings-page .text-slate-950, .settings-page .text-slate-900, .settings-page .text-slate-800, .settings-page .text-slate-700 { color:#f5f5f5 !important; }
@@ -103,6 +103,8 @@ button:disabled { cursor: not-allowed; }
   .annotate-page header:not(.transparent-titlebar), .annotate-page section, .annotate-page section > div:first-child { background:#181818 !important; border-color:rgba(255,255,255,.1) !important; }
   .annotate-page .bg-slate-50 { background:#181818 !important; }
   .annotate-page .bg-white\/90 { background:#181818 !important; }
-  .annotate-page .bg-slate-100 { background:rgba(255,255,255,.1) !important; }
-  .annotate-page .hover\:bg-slate-100:hover, .annotate-page .hover\:bg-slate-200:hover { background:rgba(255,255,255,.2) !important; }
+  .annotate-page .bg-slate-100, .annotate-page .bg-neutral-100 { background:rgba(255,255,255,.1) !important; color:#f5f5f5 !important; }
+  .annotate-page .hover\:bg-slate-100:hover, .annotate-page .hover\:bg-slate-200:hover, .annotate-page .hover\:bg-neutral-200:hover { background:rgba(255,255,255,.2) !important; color:#fff !important; }
+  .annotate-page .bg-blue-600, .annotate-page .hover\:bg-blue-700:hover { background:#2b2b2b !important; color:#fff !important; }
+  .annotate-page .bg-neutral-800, .annotate-page .hover\:bg-neutral-900:hover { background:#2b2b2b !important; color:#fff !important; }
 }
