@@ -54,7 +54,11 @@ export async function startNativeRecording(job: NativeRecordingJob): Promise<voi
       "--monitor", String(job.monitorIndex),
       "--fps", String(job.fps),
       "--bitrate", String(job.bitrate),
-    ], { stdio: ["pipe", "ignore", "pipe"], windowsHide: true });
+      "--x", String(Math.max(0, Math.round(job.rect.x))),
+      "--y", String(Math.max(0, Math.round(job.rect.y))),
+      "--width", String(Math.max(1, Math.round(job.rect.width))),
+      "--height", String(Math.max(1, Math.round(job.rect.height))),
+      ], { stdio: ["pipe", "ignore", "pipe"], windowsHide: true });
   } catch (err) {
     activeJob = null;
     throw err;

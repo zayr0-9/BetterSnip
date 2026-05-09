@@ -65,6 +65,34 @@ export interface QueueJob {
   error?: string;
 }
 
+export type AgentCaptureKind = 'screenshot' | 'video';
+export type AgentCaptureReturnType = 'path' | 'base64';
+
+export interface AgentCaptureOptions {
+  kind: AgentCaptureKind;
+  rect?: Rect;
+  save?: boolean;
+  returnType?: AgentCaptureReturnType;
+  durationMs?: number;
+  fps?: number;
+  bitrate?: number;
+  format?: 'png' | 'jpg' | 'mp4';
+}
+
+export interface AgentCaptureResult {
+  kind: AgentCaptureKind;
+  mimeType: string;
+  path?: string;
+  base64?: string;
+  requestedRect: Rect;
+  displayBounds: Rect;
+  scaleFactor: number;
+  nativeCrop: Rect;
+  outputWidth: number;
+  outputHeight: number;
+  durationMs?: number;
+}
+
 export interface BetterSnipApi {
   getSettings(): Promise<AppConfig>;
   chooseDir(): Promise<AppConfig>;

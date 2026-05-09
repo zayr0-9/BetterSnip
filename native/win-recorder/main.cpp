@@ -96,10 +96,20 @@ struct Recorder : NativeCapture {
   com_ptr<IMFSinkWriter> writer;
   DWORD stream = 0;
   int fps = 30, bitrate = 8000000;
+  int cropX = 0, cropY = 0, cropW = 0, cropH = 0, outW = 0, outH = 0;
   std::atomic<bool> running{true};
   std::mutex writeMutex;
   LONGLONG frameIndex = 0;
   com_ptr<ID3D11Texture2D> staging;
+
+  void prepareCrop() {
+    cropX = std::max(0, std::min(cropX, width - 1));
+    cropY = std::max(0, std::min(cropY, height - 1));
+    outW = cropW > 0 ? std::min(cropW, width - cropX) : width;
+    outH = cropH > 0 ? std::min(cropH, height - cropY) : height;
+    outW = std::max(2, outW & ~1);
+    outH = std::max(2, outH & ~1);
+  }
 
   void initWriter(const std::wstring& out) {
     check(MFStartup(MF_VERSION), "MFStartup");
@@ -110,13 +120,13 @@ struct Recorder : NativeCapture {
     com_ptr<IMFMediaType> output; check(MFCreateMediaType(output.put()), "MFCreateMediaType out");
     output->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video); output->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_H264);
     output->SetUINT32(MF_MT_AVG_BITRATE, bitrate); output->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive);
-    MFSetAttributeSize(output.get(), MF_MT_FRAME_SIZE, width, height); MFSetAttributeRatio(output.get(), MF_MT_FRAME_RATE, fps, 1); MFSetAttributeRatio(output.get(), MF_MT_PIXEL_ASPECT_RATIO, 1, 1);
+    MFSetAttributeSize(output.get(), MF_MT_FRAME_SIZE, outW, outH); MFSetAttributeRatio(output.get(), MF_MT_FRAME_RATE, fps, 1); MFSetAttributeRatio(output.get(), MF_MT_PIXEL_ASPECT_RATIO, 1, 1);
     output->SetUINT32(MF_MT_MPEG2_PROFILE, eAVEncH264VProfile_Main);
     check(writer->AddStream(output.get(), &stream), "AddStream");
     com_ptr<IMFMediaType> input; check(MFCreateMediaType(input.put()), "MFCreateMediaType in");
     input->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video); input->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_ARGB32);
     input->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive);
-    MFSetAttributeSize(input.get(), MF_MT_FRAME_SIZE, width, height); MFSetAttributeRatio(input.get(), MF_MT_FRAME_RATE, fps, 1); MFSetAttributeRatio(input.get(), MF_MT_PIXEL_ASPECT_RATIO, 1, 1);
+    MFSetAttributeSize(input.get(), MF_MT_FRAME_SIZE, outW, outH); MFSetAttributeRatio(input.get(), MF_MT_FRAME_RATE, fps, 1); MFSetAttributeRatio(input.get(), MF_MT_PIXEL_ASPECT_RATIO, 1, 1);
     check(writer->SetInputMediaType(stream, input.get(), nullptr), "SetInputMediaType"); check(writer->BeginWriting(), "BeginWriting");
   }
 
@@ -125,16 +135,17 @@ struct Recorder : NativeCapture {
     com_ptr<::Windows::Graphics::DirectX::Direct3D11::IDirect3DDxgiInterfaceAccess> access = surface.as<::Windows::Graphics::DirectX::Direct3D11::IDirect3DDxgiInterfaceAccess>();
     com_ptr<ID3D11Texture2D> tex; check(access->GetInterface(__uuidof(ID3D11Texture2D), tex.put_void()), "GetInterface texture");
     D3D11_TEXTURE2D_DESC desc{}; tex->GetDesc(&desc);
-    if (!staging) { desc.Usage = D3D11_USAGE_STAGING; desc.BindFlags = 0; desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ; desc.MiscFlags = 0; desc.MipLevels = 1; desc.ArraySize = 1; check(d3d->CreateTexture2D(&desc, nullptr, staging.put()), "CreateTexture2D staging"); }
-    ctx->CopyResource(staging.get(), tex.get());
+    if (!staging) { desc.Width = outW; desc.Height = outH; desc.Usage = D3D11_USAGE_STAGING; desc.BindFlags = 0; desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ; desc.MiscFlags = 0; desc.MipLevels = 1; desc.ArraySize = 1; check(d3d->CreateTexture2D(&desc, nullptr, staging.put()), "CreateTexture2D staging"); }
+    D3D11_BOX box{ (UINT)cropX, (UINT)cropY, 0, (UINT)(cropX + outW), (UINT)(cropY + outH), 1 };
+    ctx->CopySubresourceRegion(staging.get(), 0, 0, 0, 0, tex.get(), 0, &box);
     D3D11_MAPPED_SUBRESOURCE mapped{}; HRESULT hr = ctx->Map(staging.get(), 0, D3D11_MAP_READ, 0, &mapped);
     if (FAILED(hr)) { std::cerr << "ERR Map staging 0x" << std::hex << hr << std::dec << "\n"; running=false; return; }
-    com_ptr<IMFMediaBuffer> buffer; hr = MFCreateMemoryBuffer(width * height * 4, buffer.put());
+    com_ptr<IMFMediaBuffer> buffer; hr = MFCreateMemoryBuffer(outW * outH * 4, buffer.put());
     if (FAILED(hr)) { ctx->Unmap(staging.get(), 0); std::cerr << "ERR MFCreateMemoryBuffer\n"; running=false; return; }
     BYTE* dst = nullptr; DWORD maxLen = 0; buffer->Lock(&dst, &maxLen, nullptr);
-    BYTE* src = static_cast<BYTE*>(mapped.pData); const DWORD rowBytes = width * 4;
-    for (int y = 0; y < height; y++) memcpy(dst + y * rowBytes, src + y * mapped.RowPitch, rowBytes);
-    buffer->Unlock(); buffer->SetCurrentLength(rowBytes * height); ctx->Unmap(staging.get(), 0);
+    BYTE* src = static_cast<BYTE*>(mapped.pData); const DWORD rowBytes = outW * 4;
+    for (int y = 0; y < outH; y++) memcpy(dst + y * rowBytes, src + y * mapped.RowPitch, rowBytes);
+    buffer->Unlock(); buffer->SetCurrentLength(rowBytes * outH); ctx->Unmap(staging.get(), 0);
     com_ptr<IMFSample> sample; check(MFCreateSample(sample.put()), "MFCreateSample"); check(sample->AddBuffer(buffer.get()), "AddBuffer");
     LONGLONG dur = 10'000'000LL / fps; sample->SetSampleTime(frameIndex * dur); sample->SetSampleDuration(dur);
     std::lock_guard<std::mutex> lock(writeMutex); hr = writer->WriteSample(stream, sample.get());
@@ -149,7 +160,7 @@ struct Recorder : NativeCapture {
         writeFrame(frame);
       }
     });
-    session.StartCapture(); std::cerr << "READY " << width << "x" << height << "\n";
+    session.StartCapture(); std::cerr << "READY " << outW << "x" << outH << " crop=" << cropX << "," << cropY << " source=" << width << "x" << height << "\n";
     std::string line; while (running && std::getline(std::cin, line)) if (line == "stop") break; running = false;
     pool.FrameArrived(frameToken);
   }
@@ -208,8 +219,10 @@ int wmain(int argc, wchar_t** argv) {
   winrt::init_apartment(winrt::apartment_type::multi_threaded);
   if (hasArg(argc, argv, L"--screenshot")) return screenshot(argc, argv);
   auto out = arg(argc, argv, L"--out");
-  if (out.empty()) { std::cerr << "usage: win-recorder.exe --out file.mp4 [--monitor 0] [--fps 30] [--bitrate 8000000]\n"; return 1; }
+  if (out.empty()) { std::cerr << "usage: win-recorder.exe --out file.mp4 [--monitor 0] [--x 0 --y 0 --width 1280 --height 720] [--fps 30] [--bitrate 8000000]\n"; return 1; }
   Recorder r; r.fps = argi(argc, argv, L"--fps", 30); r.bitrate = argi(argc, argv, L"--bitrate", 8000000);
-  r.initD3D(); r.initCaptureMonitor(argi(argc, argv, L"--monitor", 0)); r.initWriter(out); r.start(); r.stop();
+  r.cropX = argi(argc, argv, L"--x", 0); r.cropY = argi(argc, argv, L"--y", 0);
+  r.cropW = argi(argc, argv, L"--width", 0); r.cropH = argi(argc, argv, L"--height", 0);
+  r.initD3D(); r.initCaptureMonitor(argi(argc, argv, L"--monitor", 0)); r.prepareCrop(); r.initWriter(out); r.start(); r.stop();
   std::cerr << "DONE\n"; return 0;
 }

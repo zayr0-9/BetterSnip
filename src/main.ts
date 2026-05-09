@@ -1,4 +1,5 @@
 import fs from "fs";
+import http from "http";
 import path from "path";
 import { Readable } from "stream";
 import {
@@ -22,7 +23,14 @@ import { getForegroundApp, buildForegroundSlug } from "./platform/foreground";
 import { enqueueDescription, startDescriptionQueue } from "./llm/lmstudio";
 import { captureNativeScreenshot } from "./nativeCapture";
 import { cancelNativeRecording, startNativeRecording, stopNativeRecording } from "./nativeRecorder";
-import type { AppConfig, ForegroundInfo, RecordingJob, Rect } from "./types";
+import type {
+  AgentCaptureOptions,
+  AgentCaptureResult,
+  AppConfig,
+  ForegroundInfo,
+  RecordingJob,
+  Rect,
+} from "./types";
 
 let tray: Tray | undefined;
 let settingsWindow: BrowserWindow | null = null;
@@ -328,18 +336,45 @@ function showSavedToast(filePath: string): void {
   }
 }
 
+function normalizeCaptureRect(rect?: Rect): Rect {
+  const r = rect || screen.getPrimaryDisplay().bounds;
+  if (
+    !Number.isFinite(r.x) ||
+    !Number.isFinite(r.y) ||
+    !Number.isFinite(r.width) ||
+    !Number.isFinite(r.height) ||
+    r.width < 1 ||
+    r.height < 1
+  ) {
+    throw new Error("Invalid capture rect.");
+  }
+  return r;
+}
+
+function getNativeCrop(rect: Rect): {
+  display: Electron.Display;
+  monitorIndex: number;
+  crop: Rect;
+} {
+  const display = screen.getDisplayMatching(rect);
+  const displays = screen.getAllDisplays();
+  const monitorIndex = Math.max(0, displays.findIndex((d) => d.id === display.id));
+  return {
+    display,
+    monitorIndex,
+    crop: {
+      x: Math.max(0, Math.round((rect.x - display.bounds.x) * display.scaleFactor)),
+      y: Math.max(0, Math.round((rect.y - display.bounds.y) * display.scaleFactor)),
+      width: Math.max(1, Math.round(rect.width * display.scaleFactor)),
+      height: Math.max(1, Math.round(rect.height * display.scaleFactor)),
+    },
+  };
+}
+
 async function captureAndSave(rect: Rect): Promise<string> {
   ensureSaveDir();
 
-  if (
-    !Number.isFinite(rect.x) ||
-    !Number.isFinite(rect.y) ||
-    rect.width < 1 ||
-    rect.height < 1
-  ) {
-    throw new Error("Invalid screenshot selection.");
-  }
-
+  rect = normalizeCaptureRect(rect);
   for (const win of overlayWindows) {
     if (!win.isDestroyed()) {
       win.setIgnoreMouseEvents(true);
@@ -351,15 +386,7 @@ async function captureAndSave(rect: Rect): Promise<string> {
   if (process.platform !== "win32")
     throw new Error("Screenshot capture currently requires Windows.Graphics.Capture on Windows.");
 
-  const display = screen.getDisplayMatching(rect);
-  const displays = screen.getAllDisplays();
-  const monitorIndex = Math.max(0, displays.findIndex((d) => d.id === display.id));
-  const crop = {
-    x: Math.max(0, Math.round((rect.x - display.bounds.x) * display.scaleFactor)),
-    y: Math.max(0, Math.round((rect.y - display.bounds.y) * display.scaleFactor)),
-    width: Math.max(1, Math.round(rect.width * display.scaleFactor)),
-    height: Math.max(1, Math.round(rect.height * display.scaleFactor)),
-  };
+  const { monitorIndex, crop } = getNativeCrop(rect);
   const ext = config.imageFormat === "jpg" ? "jpg" : "png";
   const slug = buildForegroundSlug(foregroundAtSnip) || "screenshot";
   const filePath = uniqueFilePath(config.saveDir, `${slug}-${timestamp()}`, ext);
@@ -371,6 +398,134 @@ async function captureAndSave(rect: Rect): Promise<string> {
     if (!image.isEmpty()) clipboard.writeImage(image);
   }
   return filePath;
+}
+
+async function captureScreenshotForAgent(
+  options: AgentCaptureOptions,
+): Promise<AgentCaptureResult> {
+  ensureSaveDir();
+  if (process.platform !== "win32")
+    throw new Error("Screenshot capture currently requires Windows.");
+
+  const rect = normalizeCaptureRect(options.rect);
+  const { display, monitorIndex, crop } = getNativeCrop(rect);
+  const ext = options.format === "jpg" ? "jpg" : "png";
+  const mimeType = ext === "jpg" ? "image/jpeg" : "image/png";
+  const save = options.save !== false;
+  const filePath = save
+    ? uniqueFilePath(config.saveDir, `agent-screenshot-${timestamp()}`, ext)
+    : path.join(app.getPath("temp"), `bettersnip-agent-${Date.now()}.${ext}`);
+
+  await captureNativeScreenshot({ filePath, rect: crop, monitorIndex, format: ext });
+  if (save) settingsWindow?.webContents.send("gallery:changed");
+
+  const result: AgentCaptureResult = {
+    kind: "screenshot",
+    mimeType,
+    requestedRect: rect,
+    displayBounds: display.bounds,
+    scaleFactor: display.scaleFactor,
+    nativeCrop: crop,
+    outputWidth: crop.width,
+    outputHeight: crop.height,
+  };
+  if (save || options.returnType === "path") result.path = filePath;
+  if (options.returnType === "base64") result.base64 = fs.readFileSync(filePath, "base64");
+  if (!save && options.returnType !== "path") fs.rmSync(filePath, { force: true });
+  return result;
+}
+
+async function recordVideoForAgent(
+  options: AgentCaptureOptions,
+): Promise<AgentCaptureResult> {
+  ensureSaveDir();
+  if (process.platform !== "win32") throw new Error("Video capture currently requires Windows.");
+  if (recordingJob) throw new Error("A recording is already active.");
+
+  const rect = normalizeCaptureRect(options.rect);
+  const { display, monitorIndex, crop } = getNativeCrop(rect);
+  const save = options.save !== false;
+  const durationMs = Math.max(250, Math.min(options.durationMs || 3000, 120000));
+  const filePath = save
+    ? uniqueFilePath(config.saveDir, `agent-recording-${timestamp()}`, "mp4")
+    : path.join(app.getPath("temp"), `bettersnip-agent-${Date.now()}.mp4`);
+
+  await startNativeRecording({
+    filePath,
+    rect: crop,
+    monitorIndex,
+    fps: options.fps || 30,
+    bitrate: options.bitrate || 8_000_000,
+  });
+  await sleep(durationMs);
+  await stopNativeRecording();
+
+  if (!fs.existsSync(filePath) || fs.statSync(filePath).size <= 0)
+    throw new Error("Video recording produced no data.");
+  if (save) settingsWindow?.webContents.send("gallery:changed");
+
+  const result: AgentCaptureResult = {
+    kind: "video",
+    mimeType: "video/mp4",
+    requestedRect: rect,
+    displayBounds: display.bounds,
+    scaleFactor: display.scaleFactor,
+    nativeCrop: crop,
+    outputWidth: crop.width - (crop.width % 2),
+    outputHeight: crop.height - (crop.height % 2),
+    durationMs,
+  };
+  if (save || options.returnType === "path") result.path = filePath;
+  if (options.returnType === "base64") result.base64 = fs.readFileSync(filePath, "base64");
+  if (!save && options.returnType !== "path") fs.rmSync(filePath, { force: true });
+  return result;
+}
+
+async function agentCapture(options: AgentCaptureOptions): Promise<AgentCaptureResult> {
+  if (!options || typeof options !== "object") throw new Error("Invalid JSON body.");
+  if (options.kind === "screenshot") return captureScreenshotForAgent(options);
+  if (options.kind === "video") return recordVideoForAgent(options);
+  throw new Error("kind must be 'screenshot' or 'video'.");
+}
+
+function sendJson(res: http.ServerResponse, status: number, body: unknown): void {
+  res.writeHead(status, {
+    "Content-Type": "application/json",
+    "Cache-Control": "no-store",
+  });
+  res.end(JSON.stringify(body));
+}
+
+function startAgentHttpServer(): void {
+  const port = Number(process.env.BETTERSNIP_AGENT_PORT || 47831);
+  const server = http.createServer((req, res) => {
+    if (req.method === "GET" && req.url === "/health") {
+      sendJson(res, 200, { ok: true, app: "BetterSnip" });
+      return;
+    }
+    if (req.method !== "POST" || req.url !== "/capture") {
+      sendJson(res, 404, { error: "Not found" });
+      return;
+    }
+
+    let body = "";
+    req.setEncoding("utf8");
+    req.on("data", (chunk) => {
+      body += chunk;
+      if (body.length > 1_000_000) req.destroy(new Error("Request too large."));
+    });
+    req.on("end", async () => {
+      try {
+        const result = await agentCapture(JSON.parse(body || "{}"));
+        sendJson(res, 200, result);
+      } catch (err) {
+        sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) });
+      }
+    });
+  });
+  server.listen(port, "127.0.0.1", () => {
+    console.log(`[agent-api] listening on http://127.0.0.1:${port}`);
+  });
 }
 
 ipcMain.handle("settings:get", () => config);
@@ -646,6 +801,7 @@ app.whenReady().then(() => {
 
   config = loadConfig();
   ensureSaveDir();
+  startAgentHttpServer();
   createTray();
   registerHotkey();
   applyAutoStart(config.autoStart);
