@@ -54,10 +54,14 @@
       ]
     },
     "nsis": {
+      "artifactName": "BetterSnip.Setup.${version}.${ext}",
       "oneClick": true,
       "perMachine": false,
       "allowToChangeInstallationDirectory": false,
       "deleteAppDataOnUninstall": false
+    },
+    "portable": {
+      "artifactName": "BetterSnip-Portable.${ext}"
     }
   },
   "devDependencies": {

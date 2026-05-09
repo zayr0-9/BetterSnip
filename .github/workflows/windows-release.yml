@@ -32,30 +32,12 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build Windows packages
-        run: pnpm build
+      - name: Build and publish Windows packages
+        if: startsWith(github.ref, 'refs/tags/')
+        run: pnpm build -- --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Collect release files
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force artifacts | Out-Null
-          Get-ChildItem dist -Recurse -File |
-            Where-Object { $_.Extension -in '.exe', '.blockmap' -or $_.Name -like 'latest*.yml' } |
-            Copy-Item -Destination artifacts
-          $setup = Get-ChildItem artifacts -File -Filter "*Setup*.exe" | Select-Object -First 1
-          if ($setup) { Copy-Item $setup.FullName "artifacts/setup.exe" }
-
-      - name: Upload workflow artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: BetterSnip-windows
-          path: artifacts/*
-          if-no-files-found: error
-
-      - name: Publish GitHub release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: artifacts/*
+      - name: Build Windows packages
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        run: pnpm build -- --publish never
