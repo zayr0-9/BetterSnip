@@ -10,6 +10,8 @@ export interface NativeRecordingJob {
   monitorIndex: number;
   fps: number;
   bitrate: number;
+  audio?: boolean;
+  audioBitrate?: number;
 }
 
 let child: ChildProcessWithoutNullStreams | null = null;
@@ -54,6 +56,8 @@ export async function startNativeRecording(job: NativeRecordingJob): Promise<voi
       "--monitor", String(job.monitorIndex),
       "--fps", String(job.fps),
       "--bitrate", String(job.bitrate),
+      "--audio", String(!!job.audio),
+      "--audio-bitrate", String(job.audioBitrate || 128000),
       "--x", String(Math.max(0, Math.round(job.rect.x))),
       "--y", String(Math.max(0, Math.round(job.rect.y))),
       "--width", String(Math.max(1, Math.round(job.rect.width))),

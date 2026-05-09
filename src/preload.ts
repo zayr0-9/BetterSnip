@@ -4,6 +4,7 @@ import type { BetterSnipApi, PartialAppConfig, Rect, SnipMode } from "./types";
 const api: BetterSnipApi = {
   getSettings: () => ipcRenderer.invoke("settings:get"),
   chooseDir: () => ipcRenderer.invoke("settings:chooseDir"),
+  getStorageUsage: () => ipcRenderer.invoke("settings:storageUsage"),
   saveSettings: (settings: PartialAppConfig) =>
     ipcRenderer.invoke("settings:save", settings),
   finishOnboarding: (settings: PartialAppConfig) =>
@@ -21,8 +22,8 @@ const api: BetterSnipApi = {
   cancelSnip: () => ipcRenderer.invoke("snip:cancel"),
   captureSnip: (rect: Rect, mode: SnipMode = "image") =>
     ipcRenderer.invoke("snip:capture", rect, mode),
-  prepareRecording: (rect: Rect) =>
-    ipcRenderer.invoke("recording:prepare", rect),
+  prepareRecording: (rect: Rect, audio?: boolean, options?: { skipPreview?: boolean }) =>
+    ipcRenderer.invoke("recording:prepare", rect, audio, options),
   getRecordingJob: () => ipcRenderer.invoke("recording:getJob"),
   saveRecording: (buffer: ArrayBuffer) =>
     ipcRenderer.invoke("recording:save", buffer),

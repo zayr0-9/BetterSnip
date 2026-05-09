@@ -5,6 +5,8 @@
 #include <mfidl.h>
 #include <mfreadwrite.h>
 #include <codecapi.h>
+#include <mmdeviceapi.h>
+#include <audioclient.h>
 #include <wincodec.h>
 #include <winrt/base.h>
 #include <winrt/Windows.Foundation.h>
@@ -35,6 +37,7 @@ static void check(HRESULT hr, const char* what) { if (FAILED(hr)) { std::cerr <<
 static std::wstring arg(int argc, wchar_t** argv, const wchar_t* name, const wchar_t* def=L"") { for (int i=1;i+1<argc;i++) if (!_wcsicmp(argv[i], name)) return argv[i+1]; return def; }
 static int argi(int argc, wchar_t** argv, const wchar_t* name, int def) { auto s=arg(argc,argv,name,L""); return s.empty()?def:_wtoi(s.c_str()); }
 static bool hasArg(int argc, wchar_t** argv, const wchar_t* name) { for (int i=1;i<argc;i++) if (!_wcsicmp(argv[i], name)) return true; return false; }
+static bool argb(int argc, wchar_t** argv, const wchar_t* name, bool def=false) { auto s=arg(argc,argv,name,L""); if (s.empty()) return def; return !_wcsicmp(s.c_str(), L"true") || !_wcsicmp(s.c_str(), L"1") || !_wcsicmp(s.c_str(), L"yes"); }
 
 struct NativeCapture {
   com_ptr<ID3D11Device> d3d;
@@ -101,6 +104,14 @@ struct Recorder : NativeCapture {
   std::mutex writeMutex;
   LONGLONG frameIndex = 0;
   com_ptr<ID3D11Texture2D> staging;
+  bool audioEnabled = false;
+  int audioBitrate = 128000;
+  DWORD audioStream = 0;
+  WAVEFORMATEX* audioFormat = nullptr;
+  com_ptr<IAudioClient> audioClient;
+  com_ptr<IAudioCaptureClient> captureClient;
+  std::thread audioThread;
+  LONGLONG audioTime = 0;
 
   void prepareCrop() {
     cropX = std::max(0, std::min(cropX, width - 1));
@@ -109,6 +120,42 @@ struct Recorder : NativeCapture {
     outH = cropH > 0 ? std::min(cropH, height - cropY) : height;
     outW = std::max(2, outW & ~1);
     outH = std::max(2, outH & ~1);
+  }
+
+  void initAudio() {
+    com_ptr<IMMDeviceEnumerator> enumerator;
+    check(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, IID_PPV_ARGS(enumerator.put())), "MMDeviceEnumerator");
+    com_ptr<IMMDevice> device;
+    check(enumerator->GetDefaultAudioEndpoint(eRender, eConsole, device.put()), "GetDefaultAudioEndpoint");
+    check(device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, audioClient.put_void()), "Activate IAudioClient");
+    check(audioClient->GetMixFormat(&audioFormat), "GetMixFormat");
+    REFERENCE_TIME bufferDuration = 10000000;
+    check(audioClient->Initialize(AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_LOOPBACK, bufferDuration, 0, audioFormat, nullptr), "AudioClient Initialize");
+    check(audioClient->GetService(__uuidof(IAudioCaptureClient), captureClient.put_void()), "GetService IAudioCaptureClient");
+  }
+
+  void addAudioStream() {
+    com_ptr<IMFMediaType> output; check(MFCreateMediaType(output.put()), "MFCreateMediaType audio out");
+    output->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Audio); output->SetGUID(MF_MT_SUBTYPE, MFAudioFormat_AAC);
+    output->SetUINT32(MF_MT_AUDIO_NUM_CHANNELS, audioFormat->nChannels);
+    output->SetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND, audioFormat->nSamplesPerSec);
+    output->SetUINT32(MF_MT_AUDIO_AVG_BYTES_PER_SECOND, audioBitrate / 8);
+    output->SetUINT32(MF_MT_AUDIO_BITS_PER_SAMPLE, 16);
+    check(writer->AddStream(output.get(), &audioStream), "AddStream audio");
+
+    GUID subtype = audioFormat->wFormatTag == WAVE_FORMAT_IEEE_FLOAT ? MFAudioFormat_Float : MFAudioFormat_PCM;
+    if (audioFormat->wFormatTag == WAVE_FORMAT_EXTENSIBLE) {
+      auto ext = reinterpret_cast<WAVEFORMATEXTENSIBLE*>(audioFormat);
+      subtype = ext->SubFormat == KSDATAFORMAT_SUBTYPE_IEEE_FLOAT ? MFAudioFormat_Float : MFAudioFormat_PCM;
+    }
+    com_ptr<IMFMediaType> input; check(MFCreateMediaType(input.put()), "MFCreateMediaType audio in");
+    input->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Audio); input->SetGUID(MF_MT_SUBTYPE, subtype);
+    input->SetUINT32(MF_MT_AUDIO_NUM_CHANNELS, audioFormat->nChannels);
+    input->SetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND, audioFormat->nSamplesPerSec);
+    input->SetUINT32(MF_MT_AUDIO_BLOCK_ALIGNMENT, audioFormat->nBlockAlign);
+    input->SetUINT32(MF_MT_AUDIO_AVG_BYTES_PER_SECOND, audioFormat->nAvgBytesPerSec);
+    input->SetUINT32(MF_MT_AUDIO_BITS_PER_SAMPLE, audioFormat->wBitsPerSample);
+    check(writer->SetInputMediaType(audioStream, input.get(), nullptr), "SetInputMediaType audio");
   }
 
   void initWriter(const std::wstring& out) {
@@ -127,7 +174,9 @@ struct Recorder : NativeCapture {
     input->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video); input->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_ARGB32);
     input->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive);
     MFSetAttributeSize(input.get(), MF_MT_FRAME_SIZE, outW, outH); MFSetAttributeRatio(input.get(), MF_MT_FRAME_RATE, fps, 1); MFSetAttributeRatio(input.get(), MF_MT_PIXEL_ASPECT_RATIO, 1, 1);
-    check(writer->SetInputMediaType(stream, input.get(), nullptr), "SetInputMediaType"); check(writer->BeginWriting(), "BeginWriting");
+    check(writer->SetInputMediaType(stream, input.get(), nullptr), "SetInputMediaType");
+    if (audioEnabled) { initAudio(); addAudioStream(); }
+    check(writer->BeginWriting(), "BeginWriting");
   }
 
   void writeFrame(wgc::Direct3D11CaptureFrame const& frame) {
@@ -152,6 +201,41 @@ struct Recorder : NativeCapture {
     if (SUCCEEDED(hr)) { frameIndex++; if (frameIndex == 1) std::cerr << "FRAME first\n"; } else std::cerr << "ERR WriteSample 0x" << std::hex << hr << std::dec << "\n";
   }
 
+  void writeAudioSample(BYTE* data, UINT32 frames, DWORD flags) {
+    DWORD bytes = frames * audioFormat->nBlockAlign;
+    com_ptr<IMFMediaBuffer> buffer; HRESULT hr = MFCreateMemoryBuffer(bytes, buffer.put());
+    if (FAILED(hr)) { std::cerr << "ERR MFCreateMemoryBuffer audio\n"; running=false; return; }
+    BYTE* dst = nullptr; DWORD maxLen = 0; buffer->Lock(&dst, &maxLen, nullptr);
+    if (flags & AUDCLNT_BUFFERFLAGS_SILENT) memset(dst, 0, bytes); else memcpy(dst, data, bytes);
+    buffer->Unlock(); buffer->SetCurrentLength(bytes);
+    com_ptr<IMFSample> sample; check(MFCreateSample(sample.put()), "MFCreateSample audio"); check(sample->AddBuffer(buffer.get()), "AddBuffer audio");
+    LONGLONG dur = (LONGLONG)frames * 10'000'000LL / audioFormat->nSamplesPerSec;
+    sample->SetSampleTime(audioTime); sample->SetSampleDuration(dur); audioTime += dur;
+    std::lock_guard<std::mutex> lock(writeMutex); hr = writer->WriteSample(audioStream, sample.get());
+    if (FAILED(hr)) std::cerr << "ERR WriteSample audio 0x" << std::hex << hr << std::dec << "\n";
+  }
+
+  void audioLoop() {
+    CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    HRESULT hr = audioClient->Start();
+    if (FAILED(hr)) { std::cerr << "ERR audio Start 0x" << std::hex << hr << std::dec << "\n"; running=false; CoUninitialize(); return; }
+    while (running) {
+      UINT32 packet = 0; hr = captureClient->GetNextPacketSize(&packet);
+      if (FAILED(hr)) break;
+      while (packet > 0 && running) {
+        BYTE* data = nullptr; UINT32 frames = 0; DWORD flags = 0;
+        hr = captureClient->GetBuffer(&data, &frames, &flags, nullptr, nullptr);
+        if (FAILED(hr)) { running=false; break; }
+        writeAudioSample(data, frames, flags);
+        captureClient->ReleaseBuffer(frames);
+        captureClient->GetNextPacketSize(&packet);
+      }
+      Sleep(5);
+    }
+    audioClient->Stop();
+    CoUninitialize();
+  }
+
   void start() {
     auto frameToken = pool.FrameArrived([this](auto const& sender, auto const&) {
       while (auto frame = sender.TryGetNextFrame()) {
@@ -160,12 +244,13 @@ struct Recorder : NativeCapture {
         writeFrame(frame);
       }
     });
-    session.StartCapture(); std::cerr << "READY " << outW << "x" << outH << " crop=" << cropX << "," << cropY << " source=" << width << "x" << height << "\n";
+    if (audioEnabled) audioThread = std::thread([this]{ audioLoop(); });
+    session.StartCapture(); std::cerr << "READY " << outW << "x" << outH << " crop=" << cropX << "," << cropY << " source=" << width << "x" << height << " audio=" << audioEnabled << "\n";
     std::string line; while (running && std::getline(std::cin, line)) if (line == "stop") break; running = false;
     pool.FrameArrived(frameToken);
   }
 
-  void stop() { closeCapture(); std::cerr << "FRAMES " << frameIndex << "\n"; if (writer) { writer->Finalize(); writer = nullptr; } MFShutdown(); }
+  void stop() { closeCapture(); running=false; if (audioThread.joinable()) audioThread.join(); std::cerr << "FRAMES " << frameIndex << "\n"; if (writer) { writer->Finalize(); writer = nullptr; } if (audioFormat) { CoTaskMemFree(audioFormat); audioFormat = nullptr; } MFShutdown(); }
 };
 
 static void saveWic(ID3D11DeviceContext* ctx, ID3D11Texture2D* staging, const std::wstring& out, bool jpg) {
@@ -219,8 +304,8 @@ int wmain(int argc, wchar_t** argv) {
   winrt::init_apartment(winrt::apartment_type::multi_threaded);
   if (hasArg(argc, argv, L"--screenshot")) return screenshot(argc, argv);
   auto out = arg(argc, argv, L"--out");
-  if (out.empty()) { std::cerr << "usage: win-recorder.exe --out file.mp4 [--monitor 0] [--x 0 --y 0 --width 1280 --height 720] [--fps 30] [--bitrate 8000000]\n"; return 1; }
-  Recorder r; r.fps = argi(argc, argv, L"--fps", 30); r.bitrate = argi(argc, argv, L"--bitrate", 8000000);
+  if (out.empty()) { std::cerr << "usage: win-recorder.exe --out file.mp4 [--monitor 0] [--x 0 --y 0 --width 1280 --height 720] [--fps 30] [--bitrate 8000000] [--audio true]\n"; return 1; }
+  Recorder r; r.fps = argi(argc, argv, L"--fps", 30); r.bitrate = argi(argc, argv, L"--bitrate", 8000000); r.audioEnabled = argb(argc, argv, L"--audio", false); r.audioBitrate = argi(argc, argv, L"--audio-bitrate", 128000);
   r.cropX = argi(argc, argv, L"--x", 0); r.cropY = argi(argc, argv, L"--y", 0);
   r.cropW = argi(argc, argv, L"--width", 0); r.cropH = argi(argc, argv, L"--height", 0);
   r.initD3D(); r.initCaptureMonitor(argi(argc, argv, L"--monitor", 0)); r.prepareCrop(); r.initWriter(out); r.start(); r.stop();

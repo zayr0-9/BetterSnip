@@ -10,7 +10,7 @@ body,
 }
 
 .drag-region { -webkit-app-region: drag; }
-.no-drag { -webkit-app-region: no-drag; }
+.no-drag, .no-drag * { -webkit-app-region: no-drag; }
 
 button {
   transition: scale 160ms ease, background-color 160ms ease, border-color 160ms ease, color 160ms ease, box-shadow 160ms ease, opacity 160ms ease, transform 160ms ease;
@@ -22,6 +22,8 @@ button:disabled { cursor: not-allowed; }
 .settings-scroll,
 .gallery-scroll {
   scrollbar-color: rgba(115, 115, 115, .55) transparent;
+}
+.gallery-scroll {
   scrollbar-width: thin;
 }
 .gallery-scroll {
@@ -43,13 +45,34 @@ button:disabled { cursor: not-allowed; }
 .settings-scroll::-webkit-scrollbar-thumb,
 .gallery-scroll::-webkit-scrollbar-thumb {
   background: rgba(115, 115, 115, .42);
-  border: 3px solid transparent;
   border-radius: 999px;
+}
+.gallery-scroll::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
   background-clip: padding-box;
 }
 .settings-scroll::-webkit-scrollbar-thumb:hover,
 .gallery-scroll::-webkit-scrollbar-thumb:hover { background: rgba(82, 82, 82, .58); background-clip: padding-box; }
 .thumb-current { outline: 3px solid #2563eb; outline-offset: 2px; }
+.gallery-fade {
+  --gallery-edge-fade: 44px;
+}
+.gallery-fade .gallery-scroll {
+  -webkit-mask-image: linear-gradient(
+    90deg,
+    transparent 0,
+    #000 var(--gallery-edge-fade),
+    #000 calc(100% - var(--gallery-edge-fade)),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    90deg,
+    transparent 0,
+    #000 var(--gallery-edge-fade),
+    #000 calc(100% - var(--gallery-edge-fade)),
+    transparent 100%
+  );
+}
 .gallery-scroll > button { transition: transform 160ms ease, scale 160ms ease, box-shadow 160ms ease, opacity 160ms ease; }
 .gallery-scroll > button:hover { transform: translateY(-1px); scale: 1.012; }
 .gallery-scroll.is-scrolling > button { transform: scale(.985); opacity: .92; }

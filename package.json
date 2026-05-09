@@ -1,6 +1,6 @@
 {
   "name": "better-snip",
-  "version": "0.1.3",
+  "version": "0.1.5",
   "description": "Lightweight tray-first screen snipping app with foreground-app filenames.",
   "productName": "BetterSnip",
   "main": "dist/main.js",
@@ -37,7 +37,14 @@
       "!**/*.map"
     ],
     "asarUnpack": [
-      "dist/native/win-recorder.exe"
+      "dist/native/win-recorder.exe",
+      "dist/native/clipboard-file.exe"
+    ],
+    "extraResources": [
+      {
+        "from": "build/icon.ico",
+        "to": "icon.ico"
+      }
     ],
     "win": {
       "icon": "build/icon.ico",
@@ -73,6 +80,7 @@
   },
   "dependencies": {
     "fabric": "^7.3.1",
+    "lucide-react": "^1.14.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6"
   }

@@ -20,6 +20,8 @@ function OverlayApp() {
   const recordControlsRef = useRef<HTMLDivElement>(null);
   const recordBtnRef = useRef<HTMLButtonElement>(null);
   const stopBtnRef = useRef<HTMLButtonElement>(null);
+  const audioBtnRef = useRef<HTMLButtonElement>(null);
+  const fullScreenBtnRef = useRef<HTMLButtonElement>(null);
   const imageModeRef = useRef<HTMLButtonElement>(null);
   const videoModeRef = useRef<HTMLButtonElement>(null);
   const closeBtnRef = useRef<HTMLButtonElement>(null);
@@ -32,6 +34,8 @@ function OverlayApp() {
     const recordControls = recordControlsRef.current!;
     const recordBtn = recordBtnRef.current!;
     const stopBtn = stopBtnRef.current!;
+    const audioBtn = audioBtnRef.current!;
+    const fullScreenBtn = fullScreenBtnRef.current!;
     const imageMode = imageModeRef.current!;
     const videoMode = videoModeRef.current!;
     const closeBtn = closeBtnRef.current!;
@@ -44,6 +48,7 @@ function OverlayApp() {
     let videoReady = false;
     let recording = false;
     let captureInProgress = false;
+    let recordAudio = false;
 
     function clampPoint(e: MouseEvent): { x: number; y: number } {
       return {
@@ -76,6 +81,11 @@ function OverlayApp() {
       videoMode.className = `rounded px-3 py-1 ${mode === "video" ? "bg-red-600" : "hover:bg-white/15"}`;
     }
 
+    function updateAudioButton(): void {
+      audioBtn.title = recordAudio ? "Record system audio" : "Record without audio";
+      audioBtn.className = `grid h-9 w-9 place-items-center rounded-full ${recordAudio ? "text-emerald-300 hover:bg-white/15" : "text-white/45 hover:bg-white/15"}`;
+    }
+
     function setMode(next: SnipMode): void {
       if (recording || captureInProgress) return;
       mode = next;
@@ -93,6 +103,7 @@ function OverlayApp() {
         "Choose image or video, then drag to select. Esc cancels.";
       box.classList.remove("video-ready");
       updateModeButtons();
+      updateAudioButton();
     }
 
     function updateBox(): void {
@@ -206,7 +217,7 @@ function OverlayApp() {
         "grid h-9 w-9 place-items-center rounded-full text-white hover:bg-white/15";
 
       try {
-        await window.betterSnip.prepareRecording(absoluteRect(r));
+        await window.betterSnip.prepareRecording(absoluteRect(r), recordAudio);
       } catch (err) {
         recording = false;
         alert(err instanceof Error ? err.message : String(err));
@@ -221,6 +232,31 @@ function OverlayApp() {
       stopBtn.className =
         "grid h-9 w-9 place-items-center rounded-full text-white/40";
       await window.betterSnip.stopRecording();
+    }
+
+    async function onFullScreenRecord(e: MouseEvent): Promise<void> {
+      e.stopPropagation();
+      if (recording || captureInProgress) return;
+      recording = true;
+      const r: Rect = { x: 0, y: 0, width: display.width, height: display.height };
+      shade.style.display = "none";
+      modebar.style.display = "none";
+      hint.style.display = "none";
+      fullScreenBtn.disabled = true;
+      try {
+        await window.betterSnip.prepareRecording(absoluteRect(r), recordAudio, { skipPreview: true });
+      } catch (err) {
+        recording = false;
+        alert(err instanceof Error ? err.message : String(err));
+        await window.betterSnip.cancelSnip();
+      }
+    }
+
+    function onAudioToggle(e: MouseEvent): void {
+      e.stopPropagation();
+      if (recording) return;
+      recordAudio = !recordAudio;
+      updateAudioButton();
     }
 
     function closeOverlay(): void {
@@ -242,6 +278,8 @@ function OverlayApp() {
     videoMode.addEventListener("click", onVideoMode);
     recordBtn.addEventListener("click", onRecord);
     stopBtn.addEventListener("click", onStop);
+    audioBtn.addEventListener("click", onAudioToggle);
+    fullScreenBtn.addEventListener("click", onFullScreenRecord);
     closeBtn.addEventListener("click", onCloseClick);
     window.addEventListener("mousedown", onMouseDown);
     window.addEventListener("mousemove", onMouseMove);
@@ -254,6 +292,8 @@ function OverlayApp() {
       videoMode.removeEventListener("click", onVideoMode);
       recordBtn.removeEventListener("click", onRecord);
       stopBtn.removeEventListener("click", onStop);
+      audioBtn.removeEventListener("click", onAudioToggle);
+      fullScreenBtn.removeEventListener("click", onFullScreenRecord);
       closeBtn.removeEventListener("click", onCloseClick);
       window.removeEventListener("mousedown", onMouseDown);
       window.removeEventListener("mousemove", onMouseMove);
@@ -304,6 +344,13 @@ function OverlayApp() {
         >
           Video
         </button>
+        <button
+          ref={fullScreenBtnRef}
+          className="rounded px-3 py-1 hover:bg-white/15"
+          title="Record this whole screen"
+        >
+          Full screen record
+        </button>
       </div>
       <div
         ref={hintRef}
@@ -327,6 +374,26 @@ function OverlayApp() {
             aria-hidden="true"
           >
             <circle cx="12" cy="12" r="7" />
+          </svg>
+        </button>
+        <button
+          ref={audioBtnRef}
+          title="Record without audio"
+          className="grid h-9 w-9 place-items-center rounded-full text-white/45 hover:bg-white/15"
+        >
+          <svg
+            className="h-5 w-5"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M11 5 6 9H3v6h3l5 4V5z" />
+            <path d="M16 9a5 5 0 0 1 0 6" />
+            <path d="M19 6a9 9 0 0 1 0 12" />
           </svg>
         </button>
         <button

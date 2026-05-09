@@ -6,8 +6,12 @@ import type { AppConfig, PartialAppConfig } from "./types";
 export const DEFAULTS: AppConfig = {
   saveDir: "",
   hotkey: "Alt+Shift+S",
+  fullScreenRecordHotkey: "Alt+Shift+R",
   imageFormat: "png",
+  recordingFps: 30,
+  recordingQuality: "high",
   copyToClipboard: true,
+  openEditorAfterCapture: true,
   autoStart: false,
   onboardingComplete: false,
   lmStudio: {

@@ -22,6 +22,7 @@ import { loadConfig, saveConfig } from "./config";
 import { getForegroundApp, buildForegroundSlug } from "./platform/foreground";
 import { enqueueDescription, startDescriptionQueue } from "./llm/lmstudio";
 import { captureNativeScreenshot } from "./nativeCapture";
+import { copyNativeFileToClipboard } from "./nativeClipboard";
 import { cancelNativeRecording, startNativeRecording, stopNativeRecording } from "./nativeRecorder";
 import type {
   AgentCaptureOptions,
@@ -42,6 +43,13 @@ let annotationFilePath: string | null = null;
 let recordingControlsWindow: BrowserWindow | null = null;
 let recordingBorderWindow: BrowserWindow | null = null;
 let recordingJob: RecordingJob | null = null;
+const skipPreviewRecordings = new Set<string>();
+
+function recordingBitrate(): number {
+  if (config.recordingQuality === "low") return 3_000_000;
+  if (config.recordingQuality === "medium") return 5_000_000;
+  return 8_000_000;
+}
 let snipStarting = false;
 
 protocol.registerSchemesAsPrivileged([
@@ -61,10 +69,14 @@ if (process.platform === "win32") app.setAppUserModelId("com.bettersnip.app");
 
 const isDev = !app.isPackaged;
 const devServerUrl = process.env.VITE_DEV_SERVER_URL;
-const appIconPath = path.resolve(__dirname, "..", "build", "icon.ico");
+const appIconPath = isDev
+  ? path.resolve(__dirname, "..", "build", "icon.ico")
+  : path.join(process.resourcesPath, "icon.ico");
 
 function appIcon(): Electron.NativeImage {
-  return nativeImage.createFromPath(appIconPath);
+  const image = nativeImage.createFromPath(appIconPath);
+  if (image.isEmpty()) console.warn(`BetterSnip icon not found: ${appIconPath}`);
+  return image;
 }
 
 function rendererUrl(
@@ -104,6 +116,20 @@ function loadRendererPage(
 function mediaUrl(filePath: string, version: number): string {
   const encodedPath = Buffer.from(filePath, "utf8").toString("base64url");
   return `bettersnip-file://local/${encodedPath}?v=${version}`;
+}
+
+function directorySize(dirPath: string): number {
+  if (!fs.existsSync(dirPath)) return 0;
+  return fs.readdirSync(dirPath, { withFileTypes: true }).reduce((total, entry) => {
+    const entryPath = path.join(dirPath, entry.name);
+    try {
+      if (entry.isDirectory()) return total + directorySize(entryPath);
+      if (entry.isFile()) return total + fs.statSync(entryPath).size;
+    } catch (err) {
+      console.warn("Failed to read storage usage entry", entryPath, err);
+    }
+    return total;
+  }, 0);
 }
 
 function timestamp(): string {
@@ -253,11 +279,19 @@ function createTray(): void {
 
 function registerHotkey(): void {
   globalShortcut.unregisterAll();
-  const ok = globalShortcut.register(config.hotkey || "Alt+Shift+S", startSnip);
+  const snipHotkey = config.hotkey || "Alt+Shift+S";
+  const recordHotkey = config.fullScreenRecordHotkey || "Alt+Shift+R";
+  const ok = globalShortcut.register(snipHotkey, startSnip);
+  const recordOk = recordHotkey === snipHotkey || globalShortcut.register(recordHotkey, startFullScreenRecording);
   if (!ok)
     dialog.showErrorBox(
       "BetterSnip",
-      `Could not register hotkey: ${config.hotkey}`,
+      `Could not register hotkey: ${snipHotkey}`,
+    );
+  if (!recordOk)
+    dialog.showErrorBox(
+      "BetterSnip",
+      `Could not register full-screen record hotkey: ${recordHotkey}`,
     );
 }
 
@@ -321,18 +355,131 @@ async function startSnip(): Promise<void> {
   }, 500);
 }
 
+async function prepareRecording(rect: Rect, audio = false, skipPreview = false): Promise<string> {
+  if (process.platform !== "win32")
+    throw new Error(
+      "Video snip is Windows-only for now. macOS/Linux paths are reserved for future native handling.",
+    );
+  if (recordingJob) throw new Error("A recording is already active.");
+  ensureSaveDir();
+  if (
+    !Number.isFinite(rect.x) ||
+    !Number.isFinite(rect.y) ||
+    !Number.isFinite(rect.width) ||
+    !Number.isFinite(rect.height) ||
+    rect.width < 1 ||
+    rect.height < 1
+  ) {
+    throw new Error("Invalid capture rect.");
+  }
+  const display = screen.getDisplayMatching(rect);
+  const displays = screen.getAllDisplays();
+  const monitorIndex = Math.max(0, displays.findIndex((d) => d.id === display.id));
+  const slug = buildForegroundSlug(foregroundAtSnip) || "recording";
+  const filePath = uniqueFilePath(config.saveDir, `${slug}-${timestamp()}`, "mp4");
+  const crop = {
+    x: Math.max(0, Math.round((rect.x - display.bounds.x) * display.scaleFactor)),
+    y: Math.max(0, Math.round((rect.y - display.bounds.y) * display.scaleFactor)),
+    width: Math.max(1, Math.round(rect.width * display.scaleFactor)),
+    height: Math.max(1, Math.round(rect.height * display.scaleFactor)),
+  };
+  const job = {
+    sourceId: "native-wgc",
+    filePath,
+    rect,
+    displayBounds: display.bounds,
+    scaleFactor: display.scaleFactor,
+    crop,
+  };
+  recordingJob = job;
+  if (skipPreview) skipPreviewRecordings.add(filePath);
+  await startNativeRecording({
+    filePath,
+    rect: crop,
+    monitorIndex,
+    fps: config.recordingFps,
+    bitrate: recordingBitrate(),
+    audio: !!audio,
+    audioBitrate: 128_000,
+  });
+  createRecordingWindow(job);
+  closeOverlays();
+  return filePath;
+}
+
+async function startFullScreenRecording(): Promise<void> {
+  if (recordingJob) {
+    if (skipPreviewRecordings.has(recordingJob.filePath)) await stopRecording();
+    return;
+  }
+  foregroundAtSnip = await getForegroundApp();
+  const focused = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+  await prepareRecording(focused.bounds, false, true).catch((err) =>
+    dialog.showErrorBox("BetterSnip", err instanceof Error ? err.message : String(err)),
+  );
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function showSavedToast(filePath: string): void {
-  const body = `${path.basename(filePath)} saved and copied to clipboard.`;
+function showSavedToast(
+  filePath: string,
+  options: { openAnnotationOnClick?: boolean } = {},
+): void {
+  const body = `${path.basename(filePath)} saved${config.copyToClipboard ? " and copied to clipboard" : ""}.`;
+  const openOnClick = () => {
+    if (options.openAnnotationOnClick) createAnnotationWindow(filePath);
+    else shell.showItemInFolder(filePath);
+  };
   if (Notification.isSupported()) {
     const notification = new Notification({ title: "BetterSnip saved", body });
-    notification.on("click", () => shell.showItemInFolder(filePath));
+    notification.on("click", openOnClick);
     notification.show();
   } else {
     tray?.displayBalloon?.({ title: "BetterSnip saved", content: body });
+  }
+}
+
+function copyFileToClipboard(filePath: string): void {
+  const exists = fs.existsSync(filePath);
+  const size = exists ? fs.statSync(filePath).size : 0;
+  console.log("[clipboard] copyFileToClipboard called", {
+    filePath,
+    exists,
+    size,
+    copyToClipboard: config.copyToClipboard,
+    platform: process.platform,
+  });
+
+  if (!config.copyToClipboard) {
+    console.log("[clipboard] skipped: copyToClipboard setting is disabled");
+    return;
+  }
+
+  if (!exists || size <= 0) {
+    console.warn("[clipboard] skipped: file does not exist or is empty", {
+      filePath,
+      exists,
+      size,
+    });
+    return;
+  }
+
+  if (process.platform === "win32") {
+    void copyNativeFileToClipboard(filePath)
+      .then(() => console.log("[clipboard] native file clipboard copy complete", { filePath }))
+      .catch((err) => console.error("[clipboard] native file clipboard copy failed", err));
+    return;
+  }
+
+  try {
+    clipboard.writeText(filePath);
+    console.log("[clipboard] wrote file path as text", {
+      readBack: clipboard.readText(),
+    });
+  } catch (err) {
+    console.error("[clipboard] failed to copy file", err);
   }
 }
 
@@ -454,8 +601,8 @@ async function recordVideoForAgent(
     filePath,
     rect: crop,
     monitorIndex,
-    fps: options.fps || 30,
-    bitrate: options.bitrate || 8_000_000,
+    fps: options.fps || config.recordingFps,
+    bitrate: options.bitrate || recordingBitrate(),
   });
   await sleep(durationMs);
   await stopNativeRecording();
@@ -529,6 +676,10 @@ function startAgentHttpServer(): void {
 }
 
 ipcMain.handle("settings:get", () => config);
+ipcMain.handle("settings:storageUsage", () => {
+  ensureSaveDir();
+  return { bytes: directorySize(config.saveDir) };
+});
 ipcMain.handle("settings:chooseDir", async () => {
   const result = await dialog.showOpenDialog(settingsWindow, {
     title: "Choose BetterSnip save folder",
@@ -573,14 +724,21 @@ ipcMain.handle("annotation:save", (_, dataUrl, saveAsCopy = false) => {
   const match = /^data:image\/(png|jpeg);base64,(.+)$/.exec(dataUrl);
   if (!match) throw new Error("Invalid image data.");
   const buffer = Buffer.from(match[2], "base64");
+  const source = path.parse(annotationFilePath);
   const targetPath = saveAsCopy
-    ? uniqueFilePath(
-        path.dirname(annotationFilePath),
-        `${path.parse(annotationFilePath).name}-edited`,
-        "png",
-      )
-    : annotationFilePath;
+    ? uniqueFilePath(source.dir, `${source.name}-edited`, "png")
+    : source.ext.toLowerCase() === ".png"
+      ? annotationFilePath
+      : path.join(source.dir, `${source.name}.png`);
   fs.writeFileSync(targetPath, buffer);
+  if (!saveAsCopy && targetPath !== annotationFilePath) {
+    try {
+      fs.unlinkSync(annotationFilePath);
+    } catch (err) {
+      console.warn("Failed to remove original annotation file", err);
+    }
+    annotationFilePath = targetPath;
+  }
   if (config.copyToClipboard)
     clipboard.writeImage(nativeImage.createFromBuffer(buffer));
   enqueueDescription(targetPath, config);
@@ -663,17 +821,31 @@ function closeOverlays(): void {
 
 ipcMain.handle("snip:cancel", () => closeOverlays());
 ipcMain.handle("recording:getJob", () => recordingJob);
-ipcMain.handle("recording:stop", async () => {
+async function stopRecording(): Promise<void> {
+  console.log("[recording:stop] stop requested", {
+    hasRecordingJob: !!recordingJob,
+    jobFilePath: recordingJob?.filePath,
+  });
   const filePath = await stopNativeRecording();
+  console.log("[recording:stop] native stop returned", {
+    filePath,
+    exists: !!filePath && fs.existsSync(filePath),
+    size: filePath && fs.existsSync(filePath) ? fs.statSync(filePath).size : 0,
+  });
   recordingControlsWindow?.close();
   recordingBorderWindow?.close();
   recordingJob = null;
   if (filePath && fs.existsSync(filePath) && fs.statSync(filePath).size > 0) {
     settingsWindow?.webContents.send("gallery:changed");
+    copyFileToClipboard(filePath);
     showSavedToast(filePath);
+    if (skipPreviewRecordings.delete(filePath)) return;
     setTimeout(() => createAnnotationWindow(filePath), 100);
+  } else {
+    console.warn("[recording:stop] skipped post-save actions: no valid output file", { filePath });
   }
-});
+}
+ipcMain.handle("recording:stop", stopRecording);
 ipcMain.handle("recording:cancel", () => {
   cancelNativeRecording();
   recordingJob = null;
@@ -682,53 +854,31 @@ ipcMain.handle("recording:cancel", () => {
   closeOverlays();
 });
 ipcMain.handle("recording:save", (_, buffer) => {
+  console.log("[recording:save] save requested", {
+    hasRecordingJob: !!recordingJob,
+    jobFilePath: recordingJob?.filePath,
+    bytes: buffer?.byteLength || 0,
+  });
   if (!recordingJob) throw new Error("No active recording.");
-  console.log("Saving recording bytes:", buffer?.byteLength || 0);
   if (!buffer || buffer.byteLength < 100)
     throw new Error("Recording produced no video data.");
   fs.writeFileSync(recordingJob.filePath, Buffer.from(buffer));
   const filePath = recordingJob.filePath;
+  console.log("[recording:save] wrote recording file", {
+    filePath,
+    exists: fs.existsSync(filePath),
+    size: fs.existsSync(filePath) ? fs.statSync(filePath).size : 0,
+  });
   recordingJob = null;
   settingsWindow?.webContents.send("gallery:changed");
+  copyFileToClipboard(filePath);
   showSavedToast(filePath);
   setTimeout(() => createAnnotationWindow(filePath), 100);
   return filePath;
 });
-ipcMain.handle("recording:prepare", async (_, rect) => {
-  if (process.platform !== "win32")
-    throw new Error(
-      "Video snip is Windows-only for now. macOS/Linux paths are reserved for future native handling.",
-    );
-  ensureSaveDir();
-  const display = screen.getDisplayMatching(rect);
-  const displays = screen.getAllDisplays();
-  const monitorIndex = Math.max(0, displays.findIndex((d) => d.id === display.id));
-  const slug = buildForegroundSlug(foregroundAtSnip) || "recording";
-  const filePath = uniqueFilePath(
-    config.saveDir,
-    `${slug}-${timestamp()}`,
-    "mp4",
-  );
-  const crop = {
-    x: Math.round((rect.x - display.bounds.x) * display.scaleFactor),
-    y: Math.round((rect.y - display.bounds.y) * display.scaleFactor),
-    width: Math.round(rect.width * display.scaleFactor),
-    height: Math.round(rect.height * display.scaleFactor),
-  };
-  const job = {
-    sourceId: "native-wgc",
-    filePath,
-    rect,
-    displayBounds: display.bounds,
-    scaleFactor: display.scaleFactor,
-    crop,
-  };
-  recordingJob = job;
-  await startNativeRecording({ filePath, rect: crop, monitorIndex, fps: 30, bitrate: 8_000_000 });
-  createRecordingWindow(job);
-  closeOverlays();
-  return filePath;
-});
+ipcMain.handle("recording:prepare", async (_, rect, audio = false, options?: { skipPreview?: boolean }) =>
+  prepareRecording(rect, audio, !!options?.skipPreview),
+);
 ipcMain.handle("snip:capture", async (_, rect, mode = "image") => {
   if (mode === "video")
     throw new Error("Use recording:prepare for video snip.");
@@ -736,10 +886,14 @@ ipcMain.handle("snip:capture", async (_, rect, mode = "image") => {
     const filePath = await captureAndSave(rect);
     settingsWindow?.webContents.send("gallery:changed");
 
-    // Always show the newest image capture in the editor. If an editor is already
-    // open, createAnnotationWindow updates annotationFilePath and reloads that
-    // window so the new screenshot replaces the previous edit session.
-    createAnnotationWindow(filePath);
+    showSavedToast(filePath, {
+      openAnnotationOnClick: !config.openEditorAfterCapture,
+    });
+
+    // Show the newest image capture in the editor unless disabled. If an editor is
+    // already open, createAnnotationWindow updates annotationFilePath and reloads
+    // that window so the new screenshot replaces the previous edit session.
+    if (config.openEditorAfterCapture) createAnnotationWindow(filePath);
     return filePath;
   } finally {
     closeOverlays();
@@ -770,6 +924,7 @@ app.whenReady().then(() => {
         "Content-Type": type,
         "Accept-Ranges": "bytes",
         "Cache-Control": "no-store",
+        "Access-Control-Allow-Origin": "*",
         ...extra,
       });
 

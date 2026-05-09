@@ -1,5 +1,6 @@
 $ErrorActionPreference = 'Stop'
-$proj = Join-Path $PSScriptRoot '..\native\win-recorder\win-recorder.vcxproj'
+$recorderProj = Join-Path $PSScriptRoot '..\native\win-recorder\win-recorder.vcxproj'
+$clipboardProj = Join-Path $PSScriptRoot '..\native\clipboard-file\clipboard-file.vcxproj'
 $outDir = Join-Path $PSScriptRoot '..\dist\native'
 New-Item -ItemType Directory -Force -Path $outDir | Out-Null
 $cmd = Get-Command msbuild.exe -ErrorAction SilentlyContinue
@@ -12,9 +13,16 @@ if (-not $msbuild) {
   }
 }
 if (-not $msbuild -or -not (Test-Path $msbuild)) { throw 'MSBuild not found. Install Visual Studio Build Tools with Desktop development with C++.' }
-& $msbuild $proj /p:Configuration=Release /p:Platform=x64 /m
-$built = Get-ChildItem (Join-Path $PSScriptRoot '..\native\win-recorder') -Recurse -Filter win-recorder.exe | Where-Object FullName -match 'Release' | Select-Object -First 1
-if (-not $built) { throw 'Native recorder exe was not produced.' }
+& $msbuild $recorderProj /p:Configuration=Release /p:Platform=x64 /m
+& $msbuild $clipboardProj /p:Configuration=Release /p:Platform=x64 /m
+
+$builtRecorder = Get-ChildItem (Join-Path $PSScriptRoot '..\native\win-recorder') -Recurse -Filter win-recorder.exe | Where-Object FullName -match 'Release' | Select-Object -First 1
+if (-not $builtRecorder) { throw 'Native recorder exe was not produced.' }
+$builtClipboard = Get-ChildItem (Join-Path $PSScriptRoot '..\native\clipboard-file') -Recurse -Filter clipboard-file.exe | Where-Object FullName -match 'Release' | Select-Object -First 1
+if (-not $builtClipboard) { throw 'Native clipboard exe was not produced.' }
+
 New-Item -ItemType Directory -Force -Path $outDir | Out-Null
-Copy-Item $built.FullName (Join-Path $outDir 'win-recorder.exe') -Force
-Write-Host "Copied $($built.FullName) to $outDir"
+Copy-Item $builtRecorder.FullName (Join-Path $outDir 'win-recorder.exe') -Force
+Copy-Item $builtClipboard.FullName (Join-Path $outDir 'clipboard-file.exe') -Force
+Write-Host "Copied $($builtRecorder.FullName) to $outDir"
+Write-Host "Copied $($builtClipboard.FullName) to $outDir"

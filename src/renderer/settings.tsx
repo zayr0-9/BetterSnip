@@ -1,7 +1,13 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
-import type { AppConfig, CaptureInfo, ImageFormat } from "../types";
+import type {
+  AppConfig,
+  CaptureInfo,
+  ImageFormat,
+  PartialAppConfig,
+  VideoQuality,
+} from "../types";
 import { Icons } from "./components/Icons";
 import { TitleBar } from "./components/TitleBar";
 
@@ -16,8 +22,12 @@ const defaultLm = {
 const defaultSettings: AppConfig = {
   saveDir: "",
   hotkey: "Alt+Shift+S",
+  fullScreenRecordHotkey: "Alt+Shift+R",
   imageFormat: "png",
+  recordingFps: 30,
+  recordingQuality: "high",
   copyToClipboard: true,
+  openEditorAfterCapture: true,
   autoStart: false,
   onboardingComplete: false,
   lmStudio: defaultLm,
@@ -41,14 +51,7 @@ function Thumb({
       className={`${small ? "h-16 w-24" : "h-[96px] w-[136px]"} shrink-0 overflow-hidden rounded-xl border border-slate-200 bg-slate-200 shadow-sm ${active ? "thumb-current" : ""}`}
     >
       {item.type === "video" ? (
-        <div className="grid h-full w-full place-items-center bg-slate-900 text-white">
-          <div className="text-center">
-            <Icons.Play className="mx-auto h-6 w-6" />
-            <div className="max-w-full truncate px-1 text-[10px]">
-              {item.name}
-            </div>
-          </div>
-        </div>
+        <VideoThumb item={item} />
       ) : (
         <img
           src={item.url}
@@ -60,6 +63,27 @@ function Thumb({
   );
 }
 
+function VideoThumb({ item }: { item: CaptureInfo }) {
+  return (
+    <div className="relative h-full w-full bg-slate-900 text-white">
+      <video
+        src={item.url}
+        className="h-full w-full object-cover"
+        muted
+        preload="metadata"
+        playsInline
+        aria-label={item.name}
+      />
+      <div className="absolute inset-0 grid place-items-center bg-black/20">
+        <Icons.Play className="h-7 w-7 drop-shadow" />
+      </div>
+      <div className="absolute inset-x-0 bottom-0 truncate bg-black/55 px-1 py-0.5 text-[10px]">
+        {item.name}
+      </div>
+    </div>
+  );
+}
+
 function SettingsApp() {
   const [settings, setSettings] = useState<AppConfig>(defaultSettings);
   const [gallery, setGallery] = useState<CaptureInfo[]>([]);
@@ -68,7 +92,12 @@ function SettingsApp() {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [skipDeleteConfirm, setSkipDeleteConfirm] = useState(false);
   const [formatOpen, setFormatOpen] = useState(false);
+  const [fpsOpen, setFpsOpen] = useState(false);
+  const [qualityOpen, setQualityOpen] = useState(false);
+  const [lmStudioOpen, setLmStudioOpen] = useState(false);
   const [status, setStatus] = useState("");
+  const [storageUsage, setStorageUsage] = useState("");
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [onboardingStep, setOnboardingStep] = useState(1);
   const [onboardingStatus, setOnboardingStatus] = useState("");
   const [swipeX, setSwipeX] = useState<number | null>(null);
@@ -76,29 +105,120 @@ function SettingsApp() {
   const modalThumbsRef = useRef<HTMLDivElement>(null);
   const [thumbPages, setThumbPages] = useState({ count: 0, current: 0 });
   const thumbMeasureRaf = useRef<number | null>(null);
+  const saveTimer = useRef<number | null>(null);
+  const statusTimer = useRef<number | null>(null);
+  const lastSavedSettings = useRef("");
   const videoRef = useRef<HTMLVideoElement>(null);
   const params = new URLSearchParams(location.search);
   const isOnboarding = params.get("mode") === "onboarding";
   const item = gallery[currentImage];
 
-  const loadGallery = useCallback(
-    async () => setGallery(await window.betterSnip.listGallery()),
-    [],
-  );
+  const formatBytes = useCallback((bytes: number) => {
+    if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+    const units = ["B", "KB", "MB", "GB", "TB"];
+    const index = Math.min(
+      units.length - 1,
+      Math.floor(Math.log(bytes) / Math.log(1024)),
+    );
+    const value = bytes / 1024 ** index;
+    return `${value >= 10 || index === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[index]}`;
+  }, []);
+
+  const loadStorageUsage = useCallback(async () => {
+    const usage = await window.betterSnip.getStorageUsage();
+    setStorageUsage(`${formatBytes(usage.bytes)} used`);
+  }, [formatBytes]);
+
+  const loadGallery = useCallback(async () => {
+    setGallery(await window.betterSnip.listGallery());
+    void loadStorageUsage();
+  }, [loadStorageUsage]);
+
+  function hydrateSettings(s: PartialAppConfig): AppConfig {
+    return {
+      ...defaultSettings,
+      ...s,
+      lmStudio: { ...defaultLm, ...s.lmStudio },
+    };
+  }
+
+  function settingsPayload(source: AppConfig): PartialAppConfig {
+    return {
+      hotkey: source.hotkey.trim() || "Alt+Shift+S",
+      fullScreenRecordHotkey:
+        source.fullScreenRecordHotkey.trim() || "Alt+Shift+R",
+      imageFormat: source.imageFormat,
+      recordingFps: source.recordingFps,
+      recordingQuality: source.recordingQuality,
+      copyToClipboard: source.copyToClipboard,
+      openEditorAfterCapture: source.openEditorAfterCapture,
+      autoStart: source.autoStart,
+      lmStudio: {
+        ...source.lmStudio,
+        address: source.lmStudio.address.trim() || "localhost",
+        port: source.lmStudio.port.trim() || "1234",
+        model: source.lmStudio.model.trim() || "gemma-3-4b-it",
+        systemPrompt:
+          source.lmStudio.systemPrompt.trim() || defaultLm.systemPrompt,
+      },
+    };
+  }
 
   useEffect(() => {
     window.betterSnip.getSettings().then((s) => {
-      setSettings({
-        ...defaultSettings,
-        ...s,
-        lmStudio: { ...defaultLm, ...s.lmStudio },
-      });
+      const next = hydrateSettings(s);
+      lastSavedSettings.current = JSON.stringify(settingsPayload(next));
+      setSettings(next);
+      setSettingsLoaded(true);
       if (!isOnboarding) loadGallery();
     });
   }, [isOnboarding, loadGallery]);
   useEffect(() => {
     window.betterSnip.onGalleryChanged(() => loadGallery());
   }, [loadGallery]);
+
+  useEffect(() => {
+    if (!settingsLoaded || isOnboarding) return;
+    if (saveTimer.current !== null) window.clearTimeout(saveTimer.current);
+    saveTimer.current = window.setTimeout(async () => {
+      const payload = settingsPayload(settings);
+      const key = JSON.stringify(payload);
+      if (key === lastSavedSettings.current) return;
+      setStatus("Saving…");
+      try {
+        const saved = await window.betterSnip.saveSettings(payload);
+        lastSavedSettings.current = key;
+        const hydrated = hydrateSettings(saved);
+        const hydratedKey = JSON.stringify(settingsPayload(hydrated));
+        if (hydratedKey !== key) {
+          lastSavedSettings.current = hydratedKey;
+          setSettings(hydrated);
+        }
+        setStatus("Saved");
+      } catch (err) {
+        setStatus(
+          err instanceof Error ? err.message : "Could not save settings",
+        );
+      }
+      if (statusTimer.current !== null)
+        window.clearTimeout(statusTimer.current);
+      statusTimer.current = window.setTimeout(() => setStatus(""), 2500);
+    }, 500);
+    return () => {
+      if (saveTimer.current !== null) window.clearTimeout(saveTimer.current);
+    };
+  }, [settings, settingsLoaded, isOnboarding]);
+
+  useEffect(() => {
+    const onPointerDown = (e: PointerEvent) => {
+      if ((e.target as HTMLElement | null)?.closest(".custom-select")) return;
+      setFormatOpen(false);
+      setFpsOpen(false);
+      setQualityOpen(false);
+    };
+    window.addEventListener("pointerdown", onPointerDown);
+    return () => window.removeEventListener("pointerdown", onPointerDown);
+  }, []);
 
   const updateThumbPages = useCallback(() => {
     const el = rowRef.current;
@@ -188,11 +308,13 @@ function SettingsApp() {
   }
   async function chooseFolder() {
     const s = await window.betterSnip.chooseDir();
-    setSettings({
-      ...defaultSettings,
-      ...s,
-      lmStudio: { ...defaultLm, ...s.lmStudio },
-    });
+    const next = hydrateSettings(s);
+    lastSavedSettings.current = JSON.stringify(settingsPayload(next));
+    setSettings(next);
+    setStatus("Saved");
+    void loadStorageUsage();
+    if (statusTimer.current !== null) window.clearTimeout(statusTimer.current);
+    statusTimer.current = window.setTimeout(() => setStatus(""), 2500);
   }
   function nudge(direction: number) {
     scrollThumbnailsBy(rowRef, direction);
@@ -231,30 +353,6 @@ function SettingsApp() {
     if (slideThumbs) requestAnimationFrame(() => centerModalThumb(next));
   }
 
-  async function save() {
-    const s = await window.betterSnip.saveSettings({
-      hotkey: settings.hotkey.trim() || "Alt+Shift+S",
-      imageFormat: settings.imageFormat,
-      copyToClipboard: settings.copyToClipboard,
-      autoStart: settings.autoStart,
-      lmStudio: {
-        ...settings.lmStudio,
-        address: settings.lmStudio.address.trim() || "localhost",
-        port: settings.lmStudio.port.trim() || "1234",
-        model: settings.lmStudio.model.trim() || "gemma-3-4b-it",
-        systemPrompt:
-          settings.lmStudio.systemPrompt.trim() || defaultLm.systemPrompt,
-      },
-    });
-    setSettings({
-      ...defaultSettings,
-      ...s,
-      lmStudio: { ...defaultLm, ...s.lmStudio },
-    });
-    setStatus(`Saved. Hotkey: ${s.hotkey}`);
-    setTimeout(() => setStatus(""), 2500);
-  }
-
   async function finishOnboarding() {
     if (onboardingStep === 1) {
       if (!settings.saveDir) {
@@ -268,6 +366,8 @@ function SettingsApp() {
     await window.betterSnip.finishOnboarding({
       saveDir: settings.saveDir,
       hotkey: settings.hotkey.trim() || "Alt+Shift+S",
+      fullScreenRecordHotkey:
+        settings.fullScreenRecordHotkey.trim() || "Alt+Shift+R",
     });
     location.href = "settings.html?mode=settings";
   }
@@ -275,29 +375,27 @@ function SettingsApp() {
   return (
     <div className="settings-page bg-transparent text-neutral-900 h-screen overflow-hidden flex flex-col">
       <TitleBar title="BetterSnip" />
-      <main className="flex-1 min-h-0 overflow-y-auto">
+      <main className="settings-scroll flex-1 min-h-0 overflow-y-auto">
         {!isOnboarding ? (
           <section className="mx-auto w-full max-w-[1120px] px-3 py-7 sm:px-6 sm:py-8 space-y-8">
-            <div>
+            <div className="flex items-start justify-between gap-4">
               <h1 className="text-3xl font-extrabold tracking-tight text-slate-950">
                 Settings
               </h1>
-              <p className="mt-2 text-lg text-slate-500">
+              {storageUsage && (
+                <div className="mt-1 rounded-full border border-slate-200 bg-white/80 px-4 py-2 text-sm font-semibold text-slate-600 shadow-sm">
+                  {storageUsage}
+                </div>
+              )}
+              {/* <p className="mt-2 text-lg text-slate-500">
                 Configure your lightweight screenshot workflow.
-              </p>
+              </p> */}
             </div>
             <section className="space-y-4">
               <div className="flex items-center gap-3 pb-2">
                 <label className="text-base font-semibold text-slate-800">
                   Save folder
                 </label>
-                <button
-                  onClick={() => window.betterSnip.openDir()}
-                  className="inline-flex h-9 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white shadow-lg shadow-blue-600/20 hover:bg-blue-700"
-                >
-                  <Icons.Image className="h-4 w-4" />
-                  Browse Gallery
-                </button>
               </div>
               <div className="grid grid-cols-[56px_1fr_auto] items-center gap-4">
                 <div className="grid h-11 w-11 place-items-center rounded-full bg-blue-50 text-blue-600">
@@ -318,14 +416,22 @@ function SettingsApp() {
             </section>
             <section className="space-y-5">
               <div className="flex items-center justify-between">
-                <h2 className="text-base font-semibold text-slate-800">
-                  Recent gallery
-                </h2>
+                <div className="flex items-center gap-3">
+                  <h2 className="text-base font-semibold text-slate-800">
+                    Recent gallery
+                  </h2>
+                  <button
+                    onClick={loadGallery}
+                    className="inline-flex items-center gap-2 text-base font-medium text-blue-600 hover:text-blue-700"
+                  >
+                    <Icons.Refresh className="h-5 w-5" />
+                  </button>
+                </div>
                 <button
-                  onClick={loadGallery}
+                  onClick={() => window.betterSnip.openDir()}
                   className="inline-flex items-center gap-2 text-base font-medium text-blue-600 hover:text-blue-700"
                 >
-                  Refresh <Icons.Refresh className="h-5 w-5" />
+                  Browse Gallery <Icons.Image className="h-5 w-5" />
                 </button>
               </div>
               <div className="relative px-14">
@@ -335,19 +441,21 @@ function SettingsApp() {
                 >
                   <Icons.ChevronLeft className="h-6 w-6" />
                 </button>
-                <div
-                  ref={rowRef}
-                  className="gallery-scroll flex min-h-[118px] gap-5 overflow-x-auto overscroll-contain px-2 pt-1 pb-4"
-                  onScroll={updateThumbPages}
-                >
-                  {gallery.slice(0, 30).map((g, i) => (
-                    <Thumb
-                      key={g.path}
-                      item={g}
-                      active={i === currentImage}
-                      onClick={() => openGallery(i)}
-                    />
-                  ))}
+                <div className="gallery-fade relative overflow-hidden">
+                  <div
+                    ref={rowRef}
+                    className="gallery-scroll flex min-h-[118px] gap-5 overflow-x-auto overscroll-contain px-2 pt-1 pb-4"
+                    onScroll={updateThumbPages}
+                  >
+                    {gallery.slice(0, 30).map((g, i) => (
+                      <Thumb
+                        key={g.path}
+                        item={g}
+                        active={i === currentImage}
+                        onClick={() => openGallery(i)}
+                      />
+                    ))}
+                  </div>
                 </div>
                 <button
                   onClick={() => nudge(1)}
@@ -387,7 +495,23 @@ function SettingsApp() {
                   Electron accelerator format, e.g. Alt+Shift+S, Ctrl+Shift+X.
                 </p>
               </div>
-              <div></div>
+              <div className="space-y-3">
+                <label className="block pb-2 text-base font-semibold text-slate-800">
+                  Full-screen record hotkey
+                </label>
+                <input
+                  value={settings.fullScreenRecordHotkey}
+                  onChange={(e) =>
+                    update("fullScreenRecordHotkey", e.target.value)
+                  }
+                  placeholder="Alt+Shift+R"
+                  className="h-12 w-full rounded-xl border border-slate-200 bg-white/80 px-4 text-base text-slate-700 outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <p className="text-sm text-slate-500">
+                  Records the focused display immediately without opening the
+                  overlay or video preview.
+                </p>
+              </div>
               <div className="space-y-3">
                 <label className="block pb-2 text-base font-semibold text-slate-800">
                   Image format
@@ -397,7 +521,11 @@ function SettingsApp() {
                 >
                   <button
                     id="imageFormatButton"
-                    onClick={() => setFormatOpen((v) => !v)}
+                    onClick={() => {
+                      setFormatOpen((v) => !v);
+                      setFpsOpen(false);
+                      setQualityOpen(false);
+                    }}
                     className="flex h-12 w-full items-center justify-between rounded-xl border border-slate-200 bg-white/80 px-4 text-left text-base font-medium text-slate-700 shadow-inner outline-none hover:border-blue-300 hover:bg-blue-50/40 focus:ring-2 focus:ring-blue-500"
                   >
                     <span>{settings.imageFormat.toUpperCase()}</span>
@@ -426,6 +554,88 @@ function SettingsApp() {
                   </div>
                 </div>
               </div>
+              <div className="space-y-3">
+                <label className="block pb-2 text-base font-semibold text-slate-800">
+                  Video recording
+                </label>
+                <div className="grid grid-cols-2 gap-3">
+                  <div
+                    className={`custom-select relative ${fpsOpen ? "open" : ""}`}
+                  >
+                    <button
+                      id="recordingFpsButton"
+                      onClick={() => {
+                        setFpsOpen((v) => !v);
+                        setQualityOpen(false);
+                      }}
+                      className="flex h-12 w-full items-center justify-between rounded-xl border border-slate-200 bg-white/80 px-4 text-left text-base font-medium text-slate-700 shadow-inner outline-none hover:border-blue-300 hover:bg-blue-50/40 focus:ring-2 focus:ring-blue-500"
+                    >
+                      <span>{settings.recordingFps} FPS</span>
+                      <Icons.ChevronDown className="custom-select-chevron h-5 w-5 text-slate-400 transition-transform" />
+                    </button>
+                    <div
+                      id="recordingFpsMenu"
+                      className="custom-select-menu pointer-events-none absolute left-0 right-0 top-[calc(100%+8px)] z-30 overflow-hidden rounded-xl border border-slate-200 bg-white/95 p-1 text-base text-slate-700 opacity-0 shadow-xl shadow-slate-900/10 backdrop-blur transition duration-150 ease-out -translate-y-0.5 scale-[.99]"
+                    >
+                      {[15, 30, 60].map((fps) => (
+                        <button
+                          key={fps}
+                          onClick={() => {
+                            update("recordingFps", fps);
+                            setFpsOpen(false);
+                          }}
+                          className="custom-select-option flex w-full items-center justify-between rounded-lg px-3 py-2 text-left font-medium"
+                          aria-selected={settings.recordingFps === fps}
+                        >
+                          <span>{fps} FPS</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div
+                    className={`custom-select relative ${qualityOpen ? "open" : ""}`}
+                  >
+                    <button
+                      id="recordingQualityButton"
+                      onClick={() => {
+                        setQualityOpen((v) => !v);
+                        setFpsOpen(false);
+                      }}
+                      className="flex h-12 w-full items-center justify-between rounded-xl border border-slate-200 bg-white/80 px-4 text-left text-base font-medium text-slate-700 shadow-inner outline-none hover:border-blue-300 hover:bg-blue-50/40 focus:ring-2 focus:ring-blue-500"
+                    >
+                      <span>
+                        {settings.recordingQuality[0].toUpperCase() +
+                          settings.recordingQuality.slice(1)}
+                      </span>
+                      <Icons.ChevronDown className="custom-select-chevron h-5 w-5 text-slate-400 transition-transform" />
+                    </button>
+                    <div
+                      id="recordingQualityMenu"
+                      className="custom-select-menu pointer-events-none absolute left-0 right-0 top-[calc(100%+8px)] z-30 overflow-hidden rounded-xl border border-slate-200 bg-white/95 p-1 text-base text-slate-700 opacity-0 shadow-xl shadow-slate-900/10 backdrop-blur transition duration-150 ease-out -translate-y-0.5 scale-[.99]"
+                    >
+                      {(["low", "medium", "high"] as VideoQuality[]).map(
+                        (quality) => (
+                          <button
+                            key={quality}
+                            onClick={() => {
+                              update("recordingQuality", quality);
+                              setQualityOpen(false);
+                            }}
+                            className="custom-select-option flex w-full items-center justify-between rounded-lg px-3 py-2 text-left font-medium"
+                            aria-selected={
+                              settings.recordingQuality === quality
+                            }
+                          >
+                            <span>
+                              {quality[0].toUpperCase() + quality.slice(1)}
+                            </span>
+                          </button>
+                        ),
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
               <div className="flex items-center gap-8 border-l border-slate-200 pl-8">
                 <label className="flex items-center gap-4 text-base text-slate-700">
                   <input
@@ -440,6 +650,17 @@ function SettingsApp() {
                 </label>
                 <label className="flex items-center gap-4 text-base text-slate-700">
                   <input
+                    checked={settings.openEditorAfterCapture}
+                    onChange={(e) =>
+                      update("openEditorAfterCapture", e.target.checked)
+                    }
+                    type="checkbox"
+                    className="h-5 w-5 rounded accent-blue-600"
+                  />
+                  <span>Open editor after capture</span>
+                </label>
+                <label className="flex items-center gap-4 text-base text-slate-700">
+                  <input
                     checked={settings.autoStart}
                     onChange={(e) => update("autoStart", e.target.checked)}
                     type="checkbox"
@@ -449,89 +670,101 @@ function SettingsApp() {
                 </label>
               </div>
             </section>
-            <details className="group rounded-none border-y border-slate-200 bg-transparent py-4">
-              <summary className="flex cursor-pointer list-none items-center justify-between text-base font-semibold text-slate-800">
+            <section className="rounded-none border-y border-slate-200 bg-transparent py-4">
+              <button
+                type="button"
+                onClick={() => setLmStudioOpen((open) => !open)}
+                aria-expanded={lmStudioOpen}
+                aria-controls="lm-studio-settings"
+                className="flex w-full cursor-pointer items-center justify-between text-base font-semibold text-slate-800"
+              >
                 <span className="inline-flex items-center gap-3">
                   <Icons.Sparkle className="h-7 w-7 text-blue-600" /> LM Studio
                   image description
                 </span>
-                <Icons.ChevronDown className="h-5 w-5 transition group-open:rotate-180" />
-              </summary>
-              <div className="mt-5 space-y-4 rounded-2xl border border-slate-200 bg-transparent p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-medium text-slate-800">
-                      LM Studio calls
-                    </p>
+                <Icons.ChevronDown
+                  className={`h-5 w-5 transition-transform duration-300 ${lmStudioOpen ? "rotate-180" : ""}`}
+                />
+              </button>
+              <div
+                id="lm-studio-settings"
+                className={`grid transition-[grid-template-rows,opacity,transform] duration-300 ease-out ${lmStudioOpen ? "grid-rows-[1fr] opacity-100 translate-y-0" : "grid-rows-[0fr] opacity-0 -translate-y-2"}`}
+              >
+                <div className="overflow-hidden">
+                  <div className="mt-5 space-y-4 rounded-2xl border border-slate-200 bg-transparent p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-medium text-slate-800">
+                          LM Studio calls
+                        </p>
+                        <p className="text-xs text-slate-500">
+                          Optional. When off, screenshots are saved without
+                          contacting LM Studio.
+                        </p>
+                      </div>
+                      <button
+                        onClick={() =>
+                          updateLm("enabled", !settings.lmStudio.enabled)
+                        }
+                        className={`shrink-0 rounded-xl px-4 py-2 text-sm font-semibold ${settings.lmStudio.enabled ? "bg-emerald-600 hover:bg-emerald-700 text-white" : "bg-slate-200 hover:bg-slate-300 text-slate-700"}`}
+                      >
+                        {settings.lmStudio.enabled ? "Enabled" : "Disabled"}
+                      </button>
+                    </div>
+                    <label className="flex items-center gap-3">
+                      <input
+                        checked={settings.lmStudio.autoLoad}
+                        onChange={(e) => updateLm("autoLoad", e.target.checked)}
+                        type="checkbox"
+                        className="h-4 w-4 accent-blue-600"
+                      />
+                      <span className="text-sm text-slate-700">
+                        Auto-load model before describing
+                      </span>
+                    </label>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <Field
+                        label="Address"
+                        value={settings.lmStudio.address}
+                        onChange={(v) => updateLm("address", v)}
+                      />
+                      <Field
+                        label="Port"
+                        value={settings.lmStudio.port}
+                        onChange={(v) => updateLm("port", v)}
+                      />
+                    </div>
+                    <Field
+                      label="Model"
+                      value={settings.lmStudio.model}
+                      onChange={(v) => updateLm("model", v)}
+                    />
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-slate-700">
+                        System prompt
+                      </label>
+                      <textarea
+                        value={settings.lmStudio.systemPrompt}
+                        onChange={(e) =>
+                          updateLm("systemPrompt", e.target.value)
+                        }
+                        rows={4}
+                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
                     <p className="text-xs text-slate-500">
-                      Optional. When off, screenshots are saved without
-                      contacting LM Studio.
+                      Uses LM Studio OpenAI-compatible one-shot{" "}
+                      <code>/v1/chat/completions</code>. Descriptions are stored
+                      in <code>descriptions.json</code> in your save folder.
                     </p>
                   </div>
-                  <button
-                    onClick={() =>
-                      updateLm("enabled", !settings.lmStudio.enabled)
-                    }
-                    className={`shrink-0 rounded-xl px-4 py-2 text-sm font-semibold ${settings.lmStudio.enabled ? "bg-emerald-600 hover:bg-emerald-700 text-white" : "bg-slate-200 hover:bg-slate-300 text-slate-700"}`}
-                  >
-                    {settings.lmStudio.enabled ? "Enabled" : "Disabled"}
-                  </button>
                 </div>
-                <label className="flex items-center gap-3">
-                  <input
-                    checked={settings.lmStudio.autoLoad}
-                    onChange={(e) => updateLm("autoLoad", e.target.checked)}
-                    type="checkbox"
-                    className="h-4 w-4 accent-blue-600"
-                  />
-                  <span className="text-sm text-slate-700">
-                    Auto-load model before describing
-                  </span>
-                </label>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <Field
-                    label="Address"
-                    value={settings.lmStudio.address}
-                    onChange={(v) => updateLm("address", v)}
-                  />
-                  <Field
-                    label="Port"
-                    value={settings.lmStudio.port}
-                    onChange={(v) => updateLm("port", v)}
-                  />
-                </div>
-                <Field
-                  label="Model"
-                  value={settings.lmStudio.model}
-                  onChange={(v) => updateLm("model", v)}
-                />
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-slate-700">
-                    System prompt
-                  </label>
-                  <textarea
-                    value={settings.lmStudio.systemPrompt}
-                    onChange={(e) => updateLm("systemPrompt", e.target.value)}
-                    rows={4}
-                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-                <p className="text-xs text-slate-500">
-                  Uses LM Studio OpenAI-compatible one-shot{" "}
-                  <code>/v1/chat/completions</code>. Descriptions are stored in{" "}
-                  <code>descriptions.json</code> in your save folder.
-                </p>
               </div>
-            </details>
+            </section>
             <div className="flex items-center gap-4">
-              <button
-                onClick={save}
-                className="inline-flex h-12 items-center gap-3 rounded-xl bg-emerald-600 px-6 text-base font-bold text-white shadow-lg shadow-emerald-600/25 hover:bg-emerald-700"
-              >
-                <Icons.Save className="h-5 w-5" />
-                Save settings
-              </button>
-              <p className="text-sm text-slate-500">{status}</p>
+              <p className="text-sm text-slate-500">
+                {status || "Changes save automatically."}
+              </p>
             </div>
           </section>
         ) : (
@@ -624,10 +857,11 @@ function SettingsApp() {
         )}
       </main>
       {modalOpen && item && (
-        <div className="fixed inset-0 z-50 bg-black/95 text-white">
+        <div className="no-drag fixed inset-0 z-50 bg-black/95 text-white">
           <button
             onClick={closeModal}
-            className="absolute right-4 top-4 z-20 grid h-10 w-10 place-items-center rounded-full bg-white/10 hover:bg-white/20"
+            className="no-drag absolute right-4 top-4 z-40 grid h-10 w-10 place-items-center rounded-full bg-white/15 text-white shadow-lg shadow-black/30 ring-1 ring-white/15 hover:bg-white/25"
+            title="Close"
           >
             <Icons.Close className="h-5 w-5" />
           </button>
@@ -636,13 +870,14 @@ function SettingsApp() {
               closeModal();
               await window.betterSnip.openAnnotation(item.path);
             }}
-            className="absolute right-16 top-4 z-20 grid h-10 w-10 place-items-center rounded-full bg-white/10 hover:bg-white/20"
+            className="no-drag absolute right-16 top-4 z-40 grid h-10 w-10 place-items-center rounded-full bg-white/15 text-white shadow-lg shadow-black/30 ring-1 ring-white/15 hover:bg-white/25"
+            title="Edit"
           >
             <Icons.Edit className="h-5 w-5" />
           </button>
           <button
             onClick={requestDeleteCurrentImage}
-            className="absolute right-28 top-4 z-20 grid h-10 w-10 place-items-center rounded-full bg-red-500/20 text-red-100 hover:bg-red-500/35"
+            className="no-drag absolute right-28 top-4 z-40 grid h-10 w-10 place-items-center rounded-full bg-red-500/30 text-red-100 shadow-lg shadow-black/30 ring-1 ring-red-200/20 hover:bg-red-500/45"
             title="Delete"
           >
             <Icons.Trash className="h-5 w-5" />
@@ -682,13 +917,15 @@ function SettingsApp() {
           )}
           <button
             onClick={() => moveImage(-1, true)}
-            className="absolute left-4 top-1/2 z-20 grid h-14 w-14 -translate-y-1/2 place-items-center rounded-full border border-white/30 bg-slate-250/35 text-white shadow-2xl shadow-black/40 backdrop-blur-xl ring-1 ring-black/20 transition hover:scale-105 hover:bg-slate-950/50"
+            className="no-drag absolute left-4 top-1/2 z-40 grid h-14 w-14 -translate-y-1/2 place-items-center rounded-full border border-white/30 bg-slate-950/35 text-white shadow-2xl shadow-black/40 backdrop-blur-xl ring-1 ring-black/20 transition-transform hover:bg-slate-950/55 hover:scale-105"
+            title="Previous"
           >
             <Icons.ChevronLeft className="h-8 w-8 drop-shadow-[0_2px_4px_rgba(0,0,0,0.85)]" />
           </button>
           <button
             onClick={() => moveImage(1, true)}
-            className="absolute right-4 top-1/2 z-20 grid h-14 w-14 -translate-y-1/2 place-items-center rounded-full border border-white/30 bg-slate-250/35 text-white shadow-2xl shadow-black/40 backdrop-blur-xl ring-1 ring-black/20 transition hover:scale-105 hover:bg-slate-950/50"
+            className="no-drag absolute right-4 top-1/2 z-40 grid h-14 w-14 -translate-y-1/2 place-items-center rounded-full border border-white/30 bg-slate-950/35 text-white shadow-2xl shadow-black/40 backdrop-blur-xl ring-1 ring-black/20 transition-transform hover:bg-slate-950/55 hover:scale-105"
+            title="Next"
           >
             <Icons.ChevronRight className="h-8 w-8 drop-shadow-[0_2px_4px_rgba(0,0,0,0.85)]" />
           </button>
@@ -703,7 +940,7 @@ function SettingsApp() {
               if (Math.abs(e.deltaX) > Math.abs(e.deltaY))
                 moveImage(e.deltaX > 0 ? 1 : -1);
             }}
-            className="flex h-full flex-col"
+            className="relative z-10 flex h-full flex-col"
           >
             <div className="flex min-h-0 flex-1 items-center justify-center p-6 pb-3">
               {item.type === "video" ? (

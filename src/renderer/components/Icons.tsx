@@ -13,7 +13,7 @@ export function Icon({
 }) {
   return (
     <svg
-      className={className}
+      className={`pointer-events-none ${className}`}
       viewBox={viewBox}
       fill={fill}
       stroke={fill === "none" ? "currentColor" : undefined}

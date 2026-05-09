@@ -18,23 +18,23 @@ function WindowButtons() {
       <button
         onClick={() => window.betterSnip.minimizeWindow()}
         title="Minimize"
-        className="grid h-8 w-10 place-items-center rounded-lg hover:bg-neutral-200/50"
+        className="grid h-8 w-8 place-items-center rounded-full shadow-[0_0_6px_rgba(0,0,0,0.12)] hover:bg-neutral-200/50"
       >
-        <Icons.Minimize />
+        <Icons.Minimize className="h-5 w-5" />
       </button>
       <button
         onClick={() => window.betterSnip.maximizeWindow()}
         title="Maximize"
-        className="grid h-8 w-10 place-items-center rounded-lg hover:bg-neutral-200/50"
+        className="grid h-8 w-8 place-items-center rounded-full shadow-[0_0_6px_rgba(0,0,0,0.12)] hover:bg-neutral-200/50"
       >
-        <Icons.Maximize />
+        <Icons.Maximize className="h-5 w-5" />
       </button>
       <button
         onClick={() => window.betterSnip.closeWindow()}
         title="Close"
-        className="grid h-8 w-10 place-items-center rounded-lg hover:bg-red-500 hover:text-white"
+        className="grid h-8 w-8 place-items-center rounded-full shadow-[0_0_6px_rgba(0,0,0,0.12)] hover:bg-neutral-200/50"
       >
-        <Icons.Close />
+        <Icons.Close className="h-5 w-5" />
       </button>
     </div>
   );

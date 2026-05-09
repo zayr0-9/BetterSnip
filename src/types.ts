@@ -1,5 +1,6 @@
 export type SnipMode = 'image' | 'video';
 export type ImageFormat = 'png' | 'jpg';
+export type VideoQuality = 'low' | 'medium' | 'high';
 export type CaptureType = 'image' | 'video';
 
 export interface Rect {
@@ -26,8 +27,12 @@ export interface LmStudioSettings {
 export interface AppConfig {
   saveDir: string;
   hotkey: string;
+  fullScreenRecordHotkey: string;
   imageFormat: ImageFormat;
+  recordingFps: number;
+  recordingQuality: VideoQuality;
   copyToClipboard: boolean;
+  openEditorAfterCapture: boolean;
   autoStart: boolean;
   onboardingComplete: boolean;
   lmStudio: LmStudioSettings;
@@ -93,9 +98,14 @@ export interface AgentCaptureResult {
   durationMs?: number;
 }
 
+export interface StorageUsage {
+  bytes: number;
+}
+
 export interface BetterSnipApi {
   getSettings(): Promise<AppConfig>;
   chooseDir(): Promise<AppConfig>;
+  getStorageUsage(): Promise<StorageUsage>;
   saveSettings(settings: PartialAppConfig): Promise<AppConfig>;
   finishOnboarding(settings: PartialAppConfig): Promise<AppConfig>;
   openDir(): Promise<void>;
@@ -107,7 +117,7 @@ export interface BetterSnipApi {
   closeWindow(): Promise<void>;
   cancelSnip(): Promise<void>;
   captureSnip(rect: Rect, mode?: SnipMode): Promise<string>;
-  prepareRecording(rect: Rect): Promise<string>;
+  prepareRecording(rect: Rect, audio?: boolean, options?: { skipPreview?: boolean }): Promise<string>;
   getRecordingJob(): Promise<RecordingJob | null>;
   saveRecording(buffer: ArrayBuffer): Promise<string>;
   stopRecording(): Promise<void>;
