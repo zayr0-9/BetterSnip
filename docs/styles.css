@@ -165,19 +165,18 @@ body {
     0 6px 14px rgba(18, 60, 255, 0.24),
     inset 0 0 0 1px rgba(255, 255, 255, 0.35);
 }
-.download-icon {
-  font-size: 34px;
+.actions .icon {
+  width: 28px;
+  height: 28px;
   margin-right: 15px;
-  line-height: 0;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  fill: none;
 }
 .secondary {
   border: 1px solid #111;
   color: #111;
   padding: 0 35px;
-}
-.play {
-  font-size: 23px;
-  margin-right: 18px;
 }
 .features {
   display: grid;
@@ -196,38 +195,14 @@ body {
   margin-right: 0;
 }
 .ficon {
+  width: 35px;
   height: 35px;
   margin-bottom: 15px;
-  position: relative;
   color: #123cff;
-}
-.target:before {
-  content: "⌖";
-  font-size: 40px;
-  color: #123cff;
-}
-.record:before {
-  content: "";
+  stroke: currentColor;
+  stroke-width: 1.6;
+  fill: none;
   display: block;
-  width: 34px;
-  height: 34px;
-  border: 3px solid #123cff;
-  border-radius: 50%;
-  box-shadow:
-    inset 0 0 0 8px #f5f0e7,
-    inset 0 0 0 15px #123cff;
-}
-.pen:before {
-  content: "♢";
-  font-size: 38px;
-  color: #123cff;
-  display: block;
-  transform: rotate(35deg);
-}
-.clip:before {
-  content: "▢";
-  font-size: 42px;
-  color: #123cff;
 }
 .features h3 {
   font-size: 13px;

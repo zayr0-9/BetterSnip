@@ -28,28 +28,34 @@
         <p class="lead">BetterSnip is a lightweight desktop screen capture and screen recording app for fast screenshots, quick recordings, and simple annotations — built to stay out of your way.</p>
 
         <div class="actions" id="download">
-          <a class="primary" href="https://github.com/zayr0-9/BetterSnip/releases/download/untagged-60375dce2c3dc10dc990/BetterSnip-0.1.3.exe"><span class="download-icon">↓</span> Download for Windows</a>
-          <a class="secondary" href="#"><span class="play">▶</span> See it in action</a>
+          <a class="primary" href="https://github.com/zayr0-9/BetterSnip/releases/download/untagged-60375dce2c3dc10dc990/BetterSnip-0.1.3.exe">
+            <i class="icon" data-lucide="download" aria-hidden="true"></i>
+            Download for Windows
+          </a>
+          <a class="secondary" href="#">
+            <i class="icon" data-lucide="play" aria-hidden="true"></i>
+            See it in action
+          </a>
         </div>
 
         <div class="features" id="features">
           <article>
-            <div class="ficon target"></div>
+            <i class="ficon" data-lucide="crosshair" aria-hidden="true"></i>
             <h3>Instant<br />Screenshots</h3>
             <p>Capture any area in one click.</p>
           </article>
           <article>
-            <div class="ficon record"></div>
+            <i class="ficon" data-lucide="video" aria-hidden="true"></i>
             <h3>Screen<br />Recording</h3>
             <p>Record your screen with ease.</p>
           </article>
           <article>
-            <div class="ficon pen"></div>
+            <i class="ficon" data-lucide="pen-tool" aria-hidden="true"></i>
             <h3>Quick<br />Annotations</h3>
             <p>Highlight, draw, and redact.</p>
           </article>
           <article>
-            <div class="ficon clip"></div>
+            <i class="ficon" data-lucide="clipboard" aria-hidden="true"></i>
             <h3>Clipboard<br />Ready</h3>
             <p>Copy, save, or share instantly.</p>
           </article>
@@ -61,5 +67,9 @@
       </section>
     </main>
   </div>
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+  <script>
+    lucide.createIcons();
+  </script>
 </body>
 </html>
