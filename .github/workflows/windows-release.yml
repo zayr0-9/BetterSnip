@@ -41,7 +41,9 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force artifacts | Out-Null
-          Get-ChildItem dist -File -Include *.exe,*.blockmap,latest*.yml | Copy-Item -Destination artifacts
+          Get-ChildItem dist -Recurse -File |
+            Where-Object { $_.Extension -in '.exe', '.blockmap' -or $_.Name -like 'latest*.yml' } |
+            Copy-Item -Destination artifacts
           $setup = Get-ChildItem artifacts -File -Filter "*Setup*.exe" | Select-Object -First 1
           if ($setup) { Copy-Item $setup.FullName "artifacts/setup.exe" }
 
