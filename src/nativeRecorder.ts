@@ -85,16 +85,34 @@ export async function stopNativeRecording(): Promise<string | null> {
   const filePath = activeJob?.filePath || null;
   if (!current) return filePath;
   await new Promise<void>((resolve) => {
-    const t = setTimeout(() => {
+    let resolved = false;
+    const done = () => {
+      if (resolved) return;
+      resolved = true;
+      clearTimeout(killTimer);
+      clearTimeout(finalizeGraceTimer);
+      resolve();
+    };
+    const killTimer = setTimeout(() => {
+      console.warn("[win-recorder] graceful stop timed out; killing native recorder");
       if (!current.killed) current.kill();
-      resolve();
+      done();
     }, 10000);
-    current.once("exit", () => {
-      clearTimeout(t);
-      resolve();
-    });
-    current.stdin.write("stop\n");
-    current.stdin.end();
+    const finalizeGraceTimer = setTimeout(() => {
+      console.warn("[win-recorder] native recorder is still finalizing after stop; continuing UI flow");
+      done();
+    }, 2500);
+    current.once("exit", done);
+    try {
+      current.stdin.write("stop\n", (err) => {
+        if (err) console.warn("[win-recorder] failed to write stop command", err);
+      });
+      current.stdin.end();
+    } catch (err) {
+      console.warn("[win-recorder] failed to stop native recorder", err);
+      if (!current.killed) current.kill();
+      done();
+    }
   });
   return filePath;
 }

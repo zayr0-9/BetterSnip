@@ -826,14 +826,19 @@ async function stopRecording(): Promise<void> {
     hasRecordingJob: !!recordingJob,
     jobFilePath: recordingJob?.filePath,
   });
+
+  // Make the UI respond immediately. Native finalization can take a moment,
+  // especially with hardware encoders/audio, but the stop button should never
+  // look like it failed to click.
+  recordingControlsWindow?.close();
+  recordingBorderWindow?.close();
+
   const filePath = await stopNativeRecording();
   console.log("[recording:stop] native stop returned", {
     filePath,
     exists: !!filePath && fs.existsSync(filePath),
     size: filePath && fs.existsSync(filePath) ? fs.statSync(filePath).size : 0,
   });
-  recordingControlsWindow?.close();
-  recordingBorderWindow?.close();
   recordingJob = null;
   if (filePath && fs.existsSync(filePath) && fs.statSync(filePath).size > 0) {
     settingsWindow?.webContents.send("gallery:changed");

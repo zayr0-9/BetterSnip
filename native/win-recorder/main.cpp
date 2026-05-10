@@ -103,6 +103,18 @@ struct Recorder : NativeCapture {
   std::atomic<bool> running{true};
   std::mutex writeMutex;
   LONGLONG frameIndex = 0;
+  LONGLONG qpcFreq = 0;
+  LONGLONG startQpc = 0;
+  LONGLONG lastVideoTime = -1;
+  UINT dxgiResetToken = 0;
+  com_ptr<IMFDXGIDeviceManager> deviceManager;
+  com_ptr<ID3D11VideoDevice> videoDevice;
+  com_ptr<ID3D11VideoContext> videoContext;
+  com_ptr<ID3D11VideoProcessorEnumerator> videoEnumerator;
+  com_ptr<ID3D11VideoProcessor> videoProcessor;
+  com_ptr<ID3D11Texture2D> bgraTexture;
+  com_ptr<ID3D11Texture2D> nv12Texture;
+  com_ptr<ID3D11Texture2D> lastVideoTexture;
   com_ptr<ID3D11Texture2D> staging;
   bool audioEnabled = false;
   int audioBitrate = 128000;
@@ -160,9 +172,12 @@ struct Recorder : NativeCapture {
 
   void initWriter(const std::wstring& out) {
     check(MFStartup(MF_VERSION), "MFStartup");
-    com_ptr<IMFAttributes> attrs; check(MFCreateAttributes(attrs.put(), 4), "MFCreateAttributes");
+    check(MFCreateDXGIDeviceManager(&dxgiResetToken, deviceManager.put()), "MFCreateDXGIDeviceManager");
+    check(deviceManager->ResetDevice(d3d.get(), dxgiResetToken), "DXGI ResetDevice");
+    com_ptr<IMFAttributes> attrs; check(MFCreateAttributes(attrs.put(), 8), "MFCreateAttributes");
     attrs->SetUINT32(MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, TRUE);
     attrs->SetUINT32(MF_LOW_LATENCY, TRUE);
+    attrs->SetUnknown(MF_SINK_WRITER_D3D_MANAGER, deviceManager.get());
     check(MFCreateSinkWriterFromURL(out.c_str(), nullptr, attrs.get(), writer.put()), "MFCreateSinkWriterFromURL");
     com_ptr<IMFMediaType> output; check(MFCreateMediaType(output.put()), "MFCreateMediaType out");
     output->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video); output->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_H264);
@@ -171,7 +186,7 @@ struct Recorder : NativeCapture {
     output->SetUINT32(MF_MT_MPEG2_PROFILE, eAVEncH264VProfile_Main);
     check(writer->AddStream(output.get(), &stream), "AddStream");
     com_ptr<IMFMediaType> input; check(MFCreateMediaType(input.put()), "MFCreateMediaType in");
-    input->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video); input->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_ARGB32);
+    input->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video); input->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_NV12);
     input->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive);
     MFSetAttributeSize(input.get(), MF_MT_FRAME_SIZE, outW, outH); MFSetAttributeRatio(input.get(), MF_MT_FRAME_RATE, fps, 1); MFSetAttributeRatio(input.get(), MF_MT_PIXEL_ASPECT_RATIO, 1, 1);
     check(writer->SetInputMediaType(stream, input.get(), nullptr), "SetInputMediaType");
@@ -179,26 +194,97 @@ struct Recorder : NativeCapture {
     check(writer->BeginWriting(), "BeginWriting");
   }
 
-  void writeFrame(wgc::Direct3D11CaptureFrame const& frame) {
+  com_ptr<ID3D11Texture2D> createTexture(DXGI_FORMAT format, UINT bindFlags) {
+    D3D11_TEXTURE2D_DESC desc{};
+    desc.Width = outW; desc.Height = outH; desc.MipLevels = 1; desc.ArraySize = 1;
+    desc.Format = format;
+    desc.SampleDesc.Count = 1;
+    desc.Usage = D3D11_USAGE_DEFAULT;
+    desc.BindFlags = bindFlags;
+    desc.MiscFlags = 0;
+    com_ptr<ID3D11Texture2D> tex;
+    check(d3d->CreateTexture2D(&desc, nullptr, tex.put()), "CreateTexture2D encoder");
+    return tex;
+  }
+
+  void initVideoProcessor() {
+    if (videoProcessor) return;
+    check(d3d->QueryInterface(videoDevice.put()), "Q ID3D11VideoDevice");
+    check(ctx->QueryInterface(videoContext.put()), "Q ID3D11VideoContext");
+    D3D11_VIDEO_PROCESSOR_CONTENT_DESC desc{};
+    desc.InputFrameFormat = D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE;
+    desc.InputWidth = outW; desc.InputHeight = outH;
+    desc.OutputWidth = outW; desc.OutputHeight = outH;
+    desc.Usage = D3D11_VIDEO_USAGE_PLAYBACK_NORMAL;
+    check(videoDevice->CreateVideoProcessorEnumerator(&desc, videoEnumerator.put()), "CreateVideoProcessorEnumerator");
+    check(videoDevice->CreateVideoProcessor(videoEnumerator.get(), 0, videoProcessor.put()), "CreateVideoProcessor");
+    videoContext->VideoProcessorSetStreamFrameFormat(videoProcessor.get(), 0, D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE);
+  }
+
+  com_ptr<ID3D11Texture2D> convertFrameToNv12(wgc::Direct3D11CaptureFrame const& frame) {
     auto surface = frame.Surface();
     com_ptr<::Windows::Graphics::DirectX::Direct3D11::IDirect3DDxgiInterfaceAccess> access = surface.as<::Windows::Graphics::DirectX::Direct3D11::IDirect3DDxgiInterfaceAccess>();
-    com_ptr<ID3D11Texture2D> tex; check(access->GetInterface(__uuidof(ID3D11Texture2D), tex.put_void()), "GetInterface texture");
-    D3D11_TEXTURE2D_DESC desc{}; tex->GetDesc(&desc);
-    if (!staging) { desc.Width = outW; desc.Height = outH; desc.Usage = D3D11_USAGE_STAGING; desc.BindFlags = 0; desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ; desc.MiscFlags = 0; desc.MipLevels = 1; desc.ArraySize = 1; check(d3d->CreateTexture2D(&desc, nullptr, staging.put()), "CreateTexture2D staging"); }
+    com_ptr<ID3D11Texture2D> src; check(access->GetInterface(__uuidof(ID3D11Texture2D), src.put_void()), "GetInterface texture");
+    if (!bgraTexture) bgraTexture = createTexture(DXGI_FORMAT_B8G8R8A8_UNORM, D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET);
+    if (!nv12Texture) nv12Texture = createTexture(DXGI_FORMAT_NV12, D3D11_BIND_RENDER_TARGET);
+    initVideoProcessor();
     D3D11_BOX box{ (UINT)cropX, (UINT)cropY, 0, (UINT)(cropX + outW), (UINT)(cropY + outH), 1 };
-    ctx->CopySubresourceRegion(staging.get(), 0, 0, 0, 0, tex.get(), 0, &box);
-    D3D11_MAPPED_SUBRESOURCE mapped{}; HRESULT hr = ctx->Map(staging.get(), 0, D3D11_MAP_READ, 0, &mapped);
-    if (FAILED(hr)) { std::cerr << "ERR Map staging 0x" << std::hex << hr << std::dec << "\n"; running=false; return; }
-    com_ptr<IMFMediaBuffer> buffer; hr = MFCreateMemoryBuffer(outW * outH * 4, buffer.put());
-    if (FAILED(hr)) { ctx->Unmap(staging.get(), 0); std::cerr << "ERR MFCreateMemoryBuffer\n"; running=false; return; }
-    BYTE* dst = nullptr; DWORD maxLen = 0; buffer->Lock(&dst, &maxLen, nullptr);
-    BYTE* src = static_cast<BYTE*>(mapped.pData); const DWORD rowBytes = outW * 4;
-    for (int y = 0; y < outH; y++) memcpy(dst + y * rowBytes, src + y * mapped.RowPitch, rowBytes);
-    buffer->Unlock(); buffer->SetCurrentLength(rowBytes * outH); ctx->Unmap(staging.get(), 0);
+    ctx->CopySubresourceRegion(bgraTexture.get(), 0, 0, 0, 0, src.get(), 0, &box);
+
+    D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC inDesc{};
+    inDesc.ViewDimension = D3D11_VPIV_DIMENSION_TEXTURE2D;
+    inDesc.Texture2D.MipSlice = 0;
+    inDesc.Texture2D.ArraySlice = 0;
+    com_ptr<ID3D11VideoProcessorInputView> inputView;
+    check(videoDevice->CreateVideoProcessorInputView(bgraTexture.get(), videoEnumerator.get(), &inDesc, inputView.put()), "CreateVideoProcessorInputView");
+
+    D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC outDesc{};
+    outDesc.ViewDimension = D3D11_VPOV_DIMENSION_TEXTURE2D;
+    outDesc.Texture2D.MipSlice = 0;
+    com_ptr<ID3D11VideoProcessorOutputView> outputView;
+    check(videoDevice->CreateVideoProcessorOutputView(nv12Texture.get(), videoEnumerator.get(), &outDesc, outputView.put()), "CreateVideoProcessorOutputView");
+
+    D3D11_VIDEO_PROCESSOR_STREAM stream{};
+    stream.Enable = TRUE;
+    stream.pInputSurface = inputView.get();
+    HRESULT hr = videoContext->VideoProcessorBlt(videoProcessor.get(), outputView.get(), 0, 1, &stream);
+    if (FAILED(hr)) { std::cerr << "ERR VideoProcessorBlt 0x" << std::hex << hr << std::dec << "\n"; running=false; }
+    return nv12Texture;
+  }
+
+  void writeVideoTexture(ID3D11Texture2D* texture, LONGLONG sampleTime, LONGLONG sampleDuration) {
+    com_ptr<IMFMediaBuffer> buffer;
+    HRESULT hr = MFCreateDXGISurfaceBuffer(__uuidof(ID3D11Texture2D), texture, 0, FALSE, buffer.put());
+    if (FAILED(hr)) { std::cerr << "ERR MFCreateDXGISurfaceBuffer 0x" << std::hex << hr << std::dec << "\n"; running=false; return; }
+    // DXGI surface buffers can report 0 current length by default. Some Sink Writer
+    // encoder paths reject those samples with E_INVALIDARG, especially for NV12.
+    buffer->SetCurrentLength((DWORD)(outW * outH * 3 / 2));
     com_ptr<IMFSample> sample; check(MFCreateSample(sample.put()), "MFCreateSample"); check(sample->AddBuffer(buffer.get()), "AddBuffer");
-    LONGLONG dur = 10'000'000LL / fps; sample->SetSampleTime(frameIndex * dur); sample->SetSampleDuration(dur);
+    sample->SetSampleTime(sampleTime); sample->SetSampleDuration(sampleDuration);
     std::lock_guard<std::mutex> lock(writeMutex); hr = writer->WriteSample(stream, sample.get());
-    if (SUCCEEDED(hr)) { frameIndex++; if (frameIndex == 1) std::cerr << "FRAME first\n"; } else std::cerr << "ERR WriteSample 0x" << std::hex << hr << std::dec << "\n";
+    if (SUCCEEDED(hr)) { frameIndex++; if (frameIndex == 1) std::cerr << "FRAME first gpu\n"; } else std::cerr << "ERR WriteSample 0x" << std::hex << hr << std::dec << "\n";
+  }
+
+  void writeFrame(wgc::Direct3D11CaptureFrame const& frame) {
+    auto tex = convertFrameToNv12(frame);
+    if (!running) return;
+    if (!lastVideoTexture) lastVideoTexture = createTexture(DXGI_FORMAT_NV12, D3D11_BIND_RENDER_TARGET);
+    ctx->CopyResource(lastVideoTexture.get(), tex.get());
+
+    if (!qpcFreq) { LARGE_INTEGER f{}; QueryPerformanceFrequency(&f); qpcFreq = f.QuadPart; }
+    const LONGLONG frameQpc = frame.SystemRelativeTime().count();
+    if (!startQpc) startQpc = frameQpc;
+    LONGLONG frameTime = (frameQpc - startQpc) * 10'000'000LL / qpcFreq;
+    LONGLONG nominalDur = 10'000'000LL / fps;
+    if (frameTime < 0) frameTime = frameIndex * nominalDur;
+    if (lastVideoTime >= 0) {
+      LONGLONG minNext = lastVideoTime + nominalDur / 2;
+      if (frameTime < minNext) return;
+    }
+    LONGLONG sampleTime = frameTime;
+    if (lastVideoTime >= 0 && sampleTime <= lastVideoTime) sampleTime = lastVideoTime + nominalDur;
+    writeVideoTexture(tex.get(), sampleTime, nominalDur);
+    lastVideoTime = sampleTime;
   }
 
   void writeAudioSample(BYTE* data, UINT32 frames, DWORD flags) {
@@ -250,7 +336,26 @@ struct Recorder : NativeCapture {
     pool.FrameArrived(frameToken);
   }
 
-  void stop() { closeCapture(); running=false; if (audioThread.joinable()) audioThread.join(); std::cerr << "FRAMES " << frameIndex << "\n"; if (writer) { writer->Finalize(); writer = nullptr; } if (audioFormat) { CoTaskMemFree(audioFormat); audioFormat = nullptr; } MFShutdown(); }
+  void stop() {
+    closeCapture();
+    running=false;
+    if (audioThread.joinable()) audioThread.join();
+    if (writer && lastVideoTexture && startQpc && lastVideoTime >= 0) {
+      LARGE_INTEGER now{}; QueryPerformanceCounter(&now);
+      LONGLONG elapsed = (now.QuadPart - startQpc) * 10'000'000LL / qpcFreq;
+      LONGLONG nominalDur = 10'000'000LL / fps;
+      LONGLONG nextTime = lastVideoTime + nominalDur;
+      while (nextTime + nominalDur / 2 < elapsed) {
+        writeVideoTexture(lastVideoTexture.get(), nextTime, nominalDur);
+        lastVideoTime = nextTime;
+        nextTime += nominalDur;
+      }
+    }
+    std::cerr << "FRAMES " << frameIndex << "\n";
+    if (writer) { writer->Finalize(); writer = nullptr; }
+    if (audioFormat) { CoTaskMemFree(audioFormat); audioFormat = nullptr; }
+    MFShutdown();
+  }
 };
 
 static void saveWic(ID3D11DeviceContext* ctx, ID3D11Texture2D* staging, const std::wstring& out, bool jpg) {
