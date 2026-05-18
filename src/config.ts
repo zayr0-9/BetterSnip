@@ -14,6 +14,7 @@ export const DEFAULTS: AppConfig = {
   recordingResolution: "source",
   videoRecordingFormat: "argb",
   copyToClipboard: true,
+  keepClipboardHistory: false,
   openEditorAfterCapture: true,
   autoStart: false,
   onboardingComplete: false,

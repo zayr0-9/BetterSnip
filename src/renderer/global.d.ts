@@ -2,6 +2,7 @@ import type {
   AppConfig,
   BetterSnipApi,
   CaptureInfo,
+  ClipboardHistoryItem,
   PartialAppConfig,
   RecordingJob,
   Rect,
@@ -11,6 +12,7 @@ import type {
 declare global {
   type AppConfig = import("../types").AppConfig;
   type CaptureInfo = import("../types").CaptureInfo;
+  type ClipboardHistoryItem = import("../types").ClipboardHistoryItem;
   type PartialAppConfig = import("../types").PartialAppConfig;
   type RecordingJob = import("../types").RecordingJob;
   type Rect = import("../types").Rect;

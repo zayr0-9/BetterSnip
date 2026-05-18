@@ -26,6 +26,13 @@ import { enqueueDescription, startDescriptionQueue } from "./llm/lmstudio";
 import { captureNativeScreenshot } from "./nativeCapture";
 import { copyNativeFileToClipboard } from "./nativeClipboard";
 import { cancelNativeRecording, startNativeRecording, stopNativeRecording } from "./nativeRecorder";
+import {
+  clearClipboardHistory,
+  copyClipboardHistoryItem,
+  deleteClipboardHistoryItem,
+  listClipboardHistory,
+  startClipboardHistory,
+} from "./clipboardHistory";
 import type {
   AgentCaptureOptions,
   AgentCaptureResult,
@@ -1149,6 +1156,11 @@ ipcMain.handle("gallery:copy", (_, filePath) => {
   copyFileToClipboard(validateGalleryFile(filePath), { respectSetting: false });
 });
 
+ipcMain.handle("clipboardHistory:list", () => listClipboardHistory());
+ipcMain.handle("clipboardHistory:copy", async (_, id) => copyClipboardHistoryItem(id));
+ipcMain.handle("clipboardHistory:delete", (_, id) => deleteClipboardHistoryItem(id));
+ipcMain.handle("clipboardHistory:clear", () => clearClipboardHistory());
+
 ipcMain.handle("gallery:delete", (_, filePath) => {
   const target = validateGalleryFile(filePath);
   fs.unlinkSync(target);
@@ -1177,6 +1189,10 @@ ipcMain.handle("settings:save", (_, next) => {
   registerHotkey();
   applyAutoStart(config.autoStart);
   startDescriptionQueue(config);
+  startClipboardHistory({
+    enabled: config.keepClipboardHistory,
+    onChanged: () => settingsWindow?.webContents.send("clipboardHistory:changed"),
+  });
   return config;
 });
 function closeOverlays(): void {
@@ -1339,8 +1355,15 @@ app.whenReady().then(() => {
   registerHotkey();
   applyAutoStart(config.autoStart);
   startDescriptionQueue(config);
+  startClipboardHistory({
+    enabled: config.keepClipboardHistory,
+    onChanged: () => settingsWindow?.webContents.send("clipboardHistory:changed"),
+  });
   createSettingsWindow(config.onboardingComplete ? "settings" : "onboarding");
 });
 
 app.on("window-all-closed", () => {});
-app.on("will-quit", () => globalShortcut.unregisterAll());
+app.on("will-quit", () => {
+  globalShortcut.unregisterAll();
+  startClipboardHistory({ enabled: false, onChanged: () => {} });
+});

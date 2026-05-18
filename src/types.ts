@@ -37,6 +37,7 @@ export interface AppConfig {
   recordingResolution: RecordingResolution;
   videoRecordingFormat: VideoRecordingFormat;
   copyToClipboard: boolean;
+  keepClipboardHistory: boolean;
   openEditorAfterCapture: boolean;
   autoStart: boolean;
   onboardingComplete: boolean;
@@ -105,6 +106,24 @@ export interface AgentCaptureResult {
   durationMs?: number;
 }
 
+export type ClipboardHistoryItemType = 'text' | 'image' | 'files';
+
+export interface ClipboardHistoryItem {
+  id: string;
+  type: ClipboardHistoryItemType;
+  createdAt: number;
+  hash: string;
+  preview: string;
+  name?: string;
+  text?: string;
+  html?: string;
+  filePath?: string;
+  filePaths?: string[];
+  width?: number;
+  height?: number;
+  size?: number;
+}
+
 export interface StorageUsage {
   bytes: number;
 }
@@ -138,6 +157,11 @@ export interface BetterSnipApi {
   listGallery(): Promise<CaptureInfo[]>;
   deleteGalleryItem(filePath: string): Promise<void>;
   copyGalleryItem(filePath: string): Promise<void>;
+  listClipboardHistory(): Promise<ClipboardHistoryItem[]>;
+  copyClipboardHistoryItem(id: string): Promise<void>;
+  deleteClipboardHistoryItem(id: string): Promise<void>;
+  clearClipboardHistory(): Promise<void>;
+  onClipboardHistoryChanged(callback: () => void): void;
   onGalleryChanged(callback: () => void): void;
   minimizeWindow(): Promise<void>;
   maximizeWindow(): Promise<void>;

@@ -12,6 +12,7 @@ import type {
 } from "../types";
 import { Icons } from "./components/Icons";
 import { TitleBar } from "./components/TitleBar";
+import { ClipboardHistoryModal } from "./components/ClipboardHistoryModal";
 import { GalleryLightbox } from "./components/gallery/GalleryLightbox";
 import {
   GallerySection,
@@ -37,6 +38,7 @@ const defaultSettings: AppConfig = {
   recordingResolution: "source",
   videoRecordingFormat: "argb",
   copyToClipboard: true,
+  keepClipboardHistory: false,
   openEditorAfterCapture: true,
   autoStart: false,
   onboardingComplete: false,
@@ -56,6 +58,7 @@ function SettingsApp() {
   const [resolutionOpen, setResolutionOpen] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [lmStudioOpen, setLmStudioOpen] = useState(false);
+  const [clipboardModalOpen, setClipboardModalOpen] = useState(false);
   const [galleryViewMode, setGalleryViewMode] =
     useState<GalleryViewMode>("strip");
   const [status, setStatus] = useState("");
@@ -131,6 +134,7 @@ function SettingsApp() {
       recordingResolution: source.recordingResolution,
       videoRecordingFormat: source.videoRecordingFormat,
       copyToClipboard: source.copyToClipboard,
+      keepClipboardHistory: source.keepClipboardHistory,
       openEditorAfterCapture: source.openEditorAfterCapture,
       autoStart: source.autoStart,
       lmStudio: {
@@ -284,11 +288,20 @@ function SettingsApp() {
               <h1 className="text-3xl font-extrabold tracking-tight text-slate-950">
                 Settings
               </h1>
-              {storageUsage && (
-                <div className="mt-1 rounded-full border border-slate-200 bg-white/80 px-4 py-2 text-sm font-semibold text-slate-600 shadow-sm">
-                  {storageUsage}
-                </div>
-              )}
+              <div className="mt-1 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setClipboardModalOpen(true)}
+                  className="rounded-full border border-blue-200 bg-blue-50/80 px-4 py-2 text-sm font-semibold text-blue-700 shadow-sm hover:bg-blue-100"
+                >
+                  Clipboard History
+                </button>
+                {storageUsage && (
+                  <div className="rounded-full border border-slate-200 bg-white/80 px-4 py-2 text-sm font-semibold text-slate-600 shadow-sm">
+                    {storageUsage}
+                  </div>
+                )}
+              </div>
               {/* <p className="mt-2 text-lg text-slate-500">
                 Configure your lightweight screenshot workflow.
               </p> */}
@@ -572,7 +585,7 @@ function SettingsApp() {
                   recordings.
                 </p>
               </div>
-              <div className="flex items-center gap-8 border-l border-slate-200 pl-8">
+              <div className="flex flex-wrap items-center gap-8 border-l border-slate-200 pl-8">
                 <label className="flex items-center gap-4 text-base text-slate-700">
                   <input
                     checked={settings.copyToClipboard}
@@ -583,6 +596,17 @@ function SettingsApp() {
                     className="h-5 w-5 rounded accent-blue-600"
                   />
                   <span>Copy to clipboard</span>
+                </label>
+                <label className="flex items-center gap-4 text-base text-slate-700">
+                  <input
+                    checked={settings.keepClipboardHistory}
+                    onChange={(e) =>
+                      update("keepClipboardHistory", e.target.checked)
+                    }
+                    type="checkbox"
+                    className="h-5 w-5 rounded accent-blue-600"
+                  />
+                  <span>Keep clipboard history</span>
                 </label>
                 <label className="flex items-center gap-4 text-base text-slate-700">
                   <input
@@ -861,6 +885,10 @@ function SettingsApp() {
           </section>
         )}
       </main>
+      <ClipboardHistoryModal
+        open={clipboardModalOpen}
+        onClose={() => setClipboardModalOpen(false)}
+      />
       <GalleryLightbox
         open={modalOpen}
         gallery={gallery}

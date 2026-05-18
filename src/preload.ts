@@ -15,6 +15,15 @@ const api: BetterSnipApi = {
     ipcRenderer.invoke("gallery:delete", filePath),
   copyGalleryItem: (filePath: string) =>
     ipcRenderer.invoke("gallery:copy", filePath),
+  listClipboardHistory: () => ipcRenderer.invoke("clipboardHistory:list"),
+  copyClipboardHistoryItem: (id: string) =>
+    ipcRenderer.invoke("clipboardHistory:copy", id),
+  deleteClipboardHistoryItem: (id: string) =>
+    ipcRenderer.invoke("clipboardHistory:delete", id),
+  clearClipboardHistory: () => ipcRenderer.invoke("clipboardHistory:clear"),
+  onClipboardHistoryChanged: (callback: () => void) => {
+    ipcRenderer.on("clipboardHistory:changed", callback);
+  },
   onGalleryChanged: (callback: () => void) => {
     ipcRenderer.on("gallery:changed", callback);
   },
