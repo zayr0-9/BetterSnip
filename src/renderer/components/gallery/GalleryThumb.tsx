@@ -32,7 +32,7 @@ export function GalleryThumb({
         <VideoThumb item={item} />
       ) : (
         <img
-          src={item.url}
+          src={item.thumbUrl || item.url}
           className="h-full w-full object-cover"
           alt={item.name}
           loading="lazy"
@@ -46,14 +46,19 @@ export function GalleryThumb({
 function VideoThumb({ item }: { item: CaptureInfo }) {
   return (
     <div className="relative h-full w-full bg-slate-900 text-white">
-      <video
-        src={item.url}
-        className="h-full w-full object-cover"
-        muted
-        preload="metadata"
-        playsInline
-        aria-label={item.name}
-      />
+      {item.thumbUrl ? (
+        <img
+          src={item.thumbUrl}
+          className="h-full w-full object-cover"
+          alt={item.name}
+          loading="lazy"
+          decoding="async"
+        />
+      ) : (
+        <div className="grid h-full w-full place-items-center bg-gradient-to-br from-slate-800 to-slate-950">
+          <Icons.Image className="h-8 w-8 text-slate-500" />
+        </div>
+      )}
       <div className="absolute inset-0 grid place-items-center bg-black/20">
         <Icons.Play className="h-7 w-7 drop-shadow" />
       </div>

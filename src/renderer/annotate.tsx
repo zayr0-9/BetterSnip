@@ -100,6 +100,8 @@ function AnnotateApp() {
 
 function VideoView({ info }: { info: CaptureInfo }) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const previewRef = useRef<HTMLDivElement>(null);
+  const previewSize = useElementSize(previewRef);
   const [metadata, setMetadata] = useState({ duration: 0, width: 0, height: 0 });
   const [startTime, setStartTime] = useState(0);
   const [endTime, setEndTime] = useState(0);
@@ -171,6 +173,18 @@ function VideoView({ info }: { info: CaptureInfo }) {
     else video.pause();
   }
 
+  const videoFit = useMemo(() => {
+    const sourceW = metadata.width || resize.width || 16;
+    const sourceH = metadata.height || resize.height || 9;
+    const availableW = Math.max(0, previewSize.width - 32);
+    const availableH = Math.max(0, previewSize.height - 32);
+    const scale = Math.min(1, availableW / sourceW, availableH / sourceH);
+    return {
+      width: Math.max(1, Math.floor(sourceW * scale)),
+      height: Math.max(1, Math.floor(sourceH * scale)),
+    };
+  }, [metadata.width, metadata.height, resize.width, resize.height, previewSize.width, previewSize.height]);
+
   const resizePresets = useMemo(() => {
     const sourceW = metadata.width || resize.width || 0;
     const sourceH = metadata.height || resize.height || 0;
@@ -240,9 +254,9 @@ function VideoView({ info }: { info: CaptureInfo }) {
           <button onClick={() => window.betterSnip.openAnnotationFile()} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:border-blue-300 hover:bg-blue-50"><Icons.External />Open</button>
           <button onClick={() => window.betterSnip.closeWindow()} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:border-blue-300 hover:bg-blue-50"><X className="h-4 w-4" />Close</button>
         </div>
-        <div className="min-h-0 flex-1 grid place-items-center rounded-3xl border border-slate-200 bg-white/70 p-4 shadow-xl shadow-slate-900/5">
-          <div className="relative max-h-full max-w-full">
-            <video ref={videoRef} key={videoUrl} src={videoUrl} className="block max-h-full max-w-full rounded-2xl shadow-2xl" autoPlay onLoadedMetadata={(e) => {
+        <div ref={previewRef} className="min-h-0 flex-1 overflow-hidden grid place-items-center rounded-3xl border border-slate-200 bg-white/70 p-4 shadow-xl shadow-slate-900/5">
+          <div className="relative max-h-full max-w-full" style={{ width: videoFit.width, height: videoFit.height }}>
+            <video ref={videoRef} key={videoUrl} src={videoUrl} className="block h-full w-full rounded-2xl object-contain shadow-2xl" autoPlay onLoadedMetadata={(e) => {
               const d = e.currentTarget.duration;
               if (Number.isFinite(d) && d > 0 && !metadata.duration) {
                 setMetadata((m) => ({ ...m, duration: d }));
@@ -525,6 +539,27 @@ function VideoCropOverlay({
       </div>
     </div>
   );
+}
+
+function useElementSize<T extends HTMLElement>(ref: React.RefObject<T | null>) {
+  const [size, setSize] = useState({ width: 0, height: 0 });
+
+  useEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+
+    const update = () => {
+      const rect = element.getBoundingClientRect();
+      setSize({ width: rect.width, height: rect.height });
+    };
+    update();
+
+    const observer = new ResizeObserver(update);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [ref]);
+
+  return size;
 }
 
 function formatTime(seconds: number): string {

@@ -11,6 +11,8 @@ export interface NativeRecordingJob {
   monitorIndex: number;
   fps: number;
   bitrate: number;
+  outputWidth?: number;
+  outputHeight?: number;
   audio?: boolean;
   audioBitrate?: number;
   videoFormat?: VideoRecordingFormat;
@@ -60,6 +62,8 @@ function buildRecorderArgs(job: NativeRecordingJob, videoFormat: VideoRecordingF
     "--monitor", String(job.monitorIndex),
     "--fps", String(job.fps),
     "--bitrate", String(job.bitrate),
+    "--output-width", String(job.outputWidth || 0),
+    "--output-height", String(job.outputHeight || 0),
     "--audio", String(!!job.audio),
     "--audio-bitrate", String(job.audioBitrate || 128000),
     "--video-format", videoFormat,

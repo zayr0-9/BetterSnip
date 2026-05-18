@@ -8,11 +8,15 @@ import type {
   PartialAppConfig,
   VideoQuality,
   VideoRecordingFormat,
+  RecordingResolution,
 } from "../types";
 import { Icons } from "./components/Icons";
 import { TitleBar } from "./components/TitleBar";
 import { GalleryLightbox } from "./components/gallery/GalleryLightbox";
-import { GallerySection, type GalleryViewMode } from "./components/gallery/GallerySection";
+import {
+  GallerySection,
+  type GalleryViewMode,
+} from "./components/gallery/GallerySection";
 
 const defaultLm = {
   enabled: false,
@@ -29,6 +33,8 @@ const defaultSettings: AppConfig = {
   imageFormat: "png",
   recordingFps: 30,
   recordingQuality: "high",
+  recordingVideoBitrate: 8_000_000,
+  recordingResolution: "source",
   videoRecordingFormat: "argb",
   copyToClipboard: true,
   openEditorAfterCapture: true,
@@ -47,9 +53,11 @@ function SettingsApp() {
   const [formatOpen, setFormatOpen] = useState(false);
   const [fpsOpen, setFpsOpen] = useState(false);
   const [qualityOpen, setQualityOpen] = useState(false);
+  const [resolutionOpen, setResolutionOpen] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [lmStudioOpen, setLmStudioOpen] = useState(false);
-  const [galleryViewMode, setGalleryViewMode] = useState<GalleryViewMode>("strip");
+  const [galleryViewMode, setGalleryViewMode] =
+    useState<GalleryViewMode>("strip");
   const [status, setStatus] = useState("");
   const [storageUsage, setStorageUsage] = useState("");
   const [settingsLoaded, setSettingsLoaded] = useState(false);
@@ -91,6 +99,24 @@ function SettingsApp() {
     };
   }
 
+  function normalizeVideoBitrate(value: unknown): number {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric <= 0)
+      return defaultSettings.recordingVideoBitrate;
+    return Math.round(Math.min(Math.max(numeric, 500_000), 100_000_000));
+  }
+
+  function formatMbps(value: number): string {
+    const mbps = value / 1_000_000;
+    return Number.isInteger(mbps) ? String(mbps) : mbps.toFixed(1);
+  }
+
+  function presetVideoBitrate(quality: VideoQuality): number {
+    if (quality === "low") return 3_000_000;
+    if (quality === "medium") return 5_000_000;
+    return 8_000_000;
+  }
+
   function settingsPayload(source: AppConfig): PartialAppConfig {
     return {
       hotkey: source.hotkey.trim() || "Alt+Shift+S",
@@ -99,6 +125,10 @@ function SettingsApp() {
       imageFormat: source.imageFormat,
       recordingFps: source.recordingFps,
       recordingQuality: source.recordingQuality,
+      recordingVideoBitrate: normalizeVideoBitrate(
+        source.recordingVideoBitrate,
+      ),
+      recordingResolution: source.recordingResolution,
       videoRecordingFormat: source.videoRecordingFormat,
       copyToClipboard: source.copyToClipboard,
       openEditorAfterCapture: source.openEditorAfterCapture,
@@ -165,14 +195,21 @@ function SettingsApp() {
       setFormatOpen(false);
       setFpsOpen(false);
       setQualityOpen(false);
+      setResolutionOpen(false);
     };
     window.addEventListener("pointerdown", onPointerDown);
     return () => window.removeEventListener("pointerdown", onPointerDown);
   }, []);
 
-
   function update<K extends keyof AppConfig>(key: K, value: AppConfig[K]) {
     setSettings((s) => ({ ...s, [key]: value }));
+  }
+  function updateRecordingQuality(quality: VideoQuality) {
+    setSettings((s) => ({
+      ...s,
+      recordingQuality: quality,
+      recordingVideoBitrate: presetVideoBitrate(quality),
+    }));
   }
   function updateLm(key: keyof AppConfig["lmStudio"], value: any) {
     setSettings((s) => ({ ...s, lmStudio: { ...s.lmStudio, [key]: value } }));
@@ -242,7 +279,7 @@ function SettingsApp() {
       <TitleBar title="BetterSnip" />
       <main className="settings-scroll flex-1 min-h-0 overflow-y-auto">
         {!isOnboarding ? (
-          <section className="mx-auto w-full max-w-[1120px] px-3 py-7 sm:px-6 sm:py-8 space-y-8">
+          <section className="mx-auto w-full max-w-[1120px] xl:max-w-[1440px] px-3 py-7 sm:px-6 sm:py-8 space-y-8">
             <div className="flex items-start justify-between gap-4">
               <h1 className="text-3xl font-extrabold tracking-tight text-slate-950">
                 Settings
@@ -333,6 +370,7 @@ function SettingsApp() {
                       setFormatOpen((v) => !v);
                       setFpsOpen(false);
                       setQualityOpen(false);
+                      setResolutionOpen(false);
                     }}
                     className="flex h-12 w-full items-center justify-between rounded-xl border border-slate-200 bg-white/80 px-4 text-left text-base font-medium text-slate-700 shadow-inner outline-none hover:border-blue-300 hover:bg-blue-50/40 focus:ring-2 focus:ring-blue-500"
                   >
@@ -366,7 +404,7 @@ function SettingsApp() {
                 <label className="block pb-2 text-base font-semibold text-slate-800">
                   Video recording
                 </label>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-3 gap-3">
                   <div
                     className={`custom-select relative ${fpsOpen ? "open" : ""}`}
                   >
@@ -375,6 +413,7 @@ function SettingsApp() {
                       onClick={() => {
                         setFpsOpen((v) => !v);
                         setQualityOpen(false);
+                        setResolutionOpen(false);
                       }}
                       className="flex h-12 w-full items-center justify-between rounded-xl border border-slate-200 bg-white/80 px-4 text-left text-base font-medium text-slate-700 shadow-inner outline-none hover:border-blue-300 hover:bg-blue-50/40 focus:ring-2 focus:ring-blue-500"
                     >
@@ -391,6 +430,7 @@ function SettingsApp() {
                           onClick={() => {
                             update("recordingFps", fps);
                             setFpsOpen(false);
+                            setResolutionOpen(false);
                           }}
                           className="custom-select-option flex w-full items-center justify-between rounded-lg px-3 py-2 text-left font-medium"
                           aria-selected={settings.recordingFps === fps}
@@ -408,6 +448,7 @@ function SettingsApp() {
                       onClick={() => {
                         setQualityOpen((v) => !v);
                         setFpsOpen(false);
+                        setResolutionOpen(false);
                       }}
                       className="flex h-12 w-full items-center justify-between rounded-xl border border-slate-200 bg-white/80 px-4 text-left text-base font-medium text-slate-700 shadow-inner outline-none hover:border-blue-300 hover:bg-blue-50/40 focus:ring-2 focus:ring-blue-500"
                     >
@@ -426,8 +467,9 @@ function SettingsApp() {
                           <button
                             key={quality}
                             onClick={() => {
-                              update("recordingQuality", quality);
+                              updateRecordingQuality(quality);
                               setQualityOpen(false);
+                              setResolutionOpen(false);
                             }}
                             className="custom-select-option flex w-full items-center justify-between rounded-lg px-3 py-2 text-left font-medium"
                             aria-selected={
@@ -442,7 +484,93 @@ function SettingsApp() {
                       )}
                     </div>
                   </div>
+                  <div
+                    className={`custom-select relative ${resolutionOpen ? "open" : ""}`}
+                  >
+                    <button
+                      id="recordingResolutionButton"
+                      onClick={() => {
+                        setResolutionOpen((v) => !v);
+                        setFpsOpen(false);
+                        setQualityOpen(false);
+                      }}
+                      className="flex h-12 w-full items-center justify-between rounded-xl border border-slate-200 bg-white/80 px-4 text-left text-base font-medium text-slate-700 shadow-inner outline-none hover:border-blue-300 hover:bg-blue-50/40 focus:ring-2 focus:ring-blue-500"
+                    >
+                      <span>
+                        {settings.recordingResolution === "source"
+                          ? "Source"
+                          : settings.recordingResolution.toUpperCase()}
+                      </span>
+                      <Icons.ChevronDown className="custom-select-chevron h-5 w-5 text-slate-400 transition-transform" />
+                    </button>
+                    <div
+                      id="recordingResolutionMenu"
+                      className="custom-select-menu pointer-events-none absolute left-0 right-0 top-[calc(100%+8px)] z-30 overflow-hidden rounded-xl border border-slate-200 bg-white/95 p-1 text-base text-slate-700 opacity-0 shadow-xl shadow-slate-900/10 backdrop-blur transition duration-150 ease-out -translate-y-0.5 scale-[.99]"
+                    >
+                      {(
+                        ["source", "1080p", "720p"] as RecordingResolution[]
+                      ).map((resolution) => (
+                        <button
+                          key={resolution}
+                          onClick={() => {
+                            update("recordingResolution", resolution);
+                            setResolutionOpen(false);
+                          }}
+                          className="custom-select-option flex w-full items-center justify-between rounded-lg px-3 py-2 text-left font-medium"
+                          aria-selected={
+                            settings.recordingResolution === resolution
+                          }
+                        >
+                          <span>
+                            {resolution === "source"
+                              ? "Source"
+                              : resolution.toUpperCase()}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 </div>
+                <div className="grid grid-cols-1 gap-3 rounded-xl border border-slate-200 bg-white/60 p-3 sm:grid-cols-[1fr_auto] sm:items-end">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-slate-700">
+                      Video bitrate
+                    </label>
+                    <input
+                      type="number"
+                      min={0.5}
+                      max={100}
+                      step={0.5}
+                      value={formatMbps(settings.recordingVideoBitrate)}
+                      onChange={(e) => {
+                        const mbps = Number(e.target.value);
+                        update(
+                          "recordingVideoBitrate",
+                          (Number.isFinite(mbps)
+                            ? Math.round(mbps * 1_000_000)
+                            : 0) as AppConfig["recordingVideoBitrate"],
+                        );
+                      }}
+                      onBlur={() =>
+                        update(
+                          "recordingVideoBitrate",
+                          normalizeVideoBitrate(
+                            settings.recordingVideoBitrate,
+                          ) as AppConfig["recordingVideoBitrate"],
+                        )
+                      }
+                      className="h-12 w-full rounded-xl border border-slate-200 bg-white/80 px-4 text-base text-slate-700 shadow-inner outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div className="pb-3 text-sm font-semibold text-slate-500 sm:text-right">
+                    Mbps
+                  </div>
+                </div>
+                <p className="text-sm text-slate-500">
+                  Resolution caps scale larger recordings down on the GPU while
+                  preserving aspect ratio. Bitrate applies to new MP4/H.264
+                  recordings.
+                </p>
               </div>
               <div className="flex items-center gap-8 border-l border-slate-200 pl-8">
                 <label className="flex items-center gap-4 text-base text-slate-700">
@@ -593,27 +721,46 @@ function SettingsApp() {
                         Video recording pipeline
                       </p>
                       <p className="text-xs text-slate-500">
-                        ARGB is the default GPU-backed Media Foundation path and is the most compatible. NV12 uses D3D11 Video Processor conversion and may be faster on some systems, but can hang or fail with some GPU drivers.
+                        ARGB is the default GPU-backed Media Foundation path and
+                        is the most compatible. NV12 uses D3D11 Video Processor
+                        conversion and may be faster on some systems, but can
+                        hang or fail with some GPU drivers.
                       </p>
                     </div>
                     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                      {([
-                        ["argb", "ARGB GPU", "Default / most compatible"],
-                        ["nv12", "NV12 GPU", "Experimental / fastest when supported"],
-                      ] as [VideoRecordingFormat, string, string][]).map(([format, label, description]) => (
+                      {(
+                        [
+                          ["argb", "ARGB GPU", "Default / most compatible"],
+                          [
+                            "nv12",
+                            "NV12 GPU",
+                            "Experimental / fastest when supported",
+                          ],
+                        ] as [VideoRecordingFormat, string, string][]
+                      ).map(([format, label, description]) => (
                         <button
                           key={format}
                           type="button"
                           onClick={() => update("videoRecordingFormat", format)}
                           className={`rounded-xl border px-4 py-3 text-left transition ${settings.videoRecordingFormat === format ? "border-blue-600 bg-blue-50 text-blue-900" : "border-slate-200 bg-white/70 text-slate-700 hover:border-blue-300 hover:bg-blue-50/40"}`}
                         >
-                          <span className="block text-sm font-semibold">{label}</span>
-                          <span className="mt-1 block text-xs opacity-75">{description}</span>
+                          <span className="block text-sm font-semibold">
+                            {label}
+                          </span>
+                          <span className="mt-1 block text-xs opacity-75">
+                            {description}
+                          </span>
                         </button>
                       ))}
                     </div>
                     <p className="text-xs text-slate-500">
-                      Current selection: <code>{settings.videoRecordingFormat === "nv12" ? "optional NV12 D3D11 Video Processor path" : "default ARGB GPU-backed Media Foundation path"}</code>. Applies to new recordings.
+                      Current selection:{" "}
+                      <code>
+                        {settings.videoRecordingFormat === "nv12"
+                          ? "optional NV12 D3D11 Video Processor path"
+                          : "default ARGB GPU-backed Media Foundation path"}
+                      </code>
+                      . Applies to new recordings.
                     </p>
                   </div>
                 </div>

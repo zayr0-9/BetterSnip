@@ -100,7 +100,7 @@ struct Recorder : NativeCapture {
   com_ptr<IMFSinkWriter> writer;
   DWORD stream = 0;
   int fps = 30, bitrate = 8000000;
-  int cropX = 0, cropY = 0, cropW = 0, cropH = 0, outW = 0, outH = 0;
+  int cropX = 0, cropY = 0, cropW = 0, cropH = 0, srcW = 0, srcH = 0, outW = 0, outH = 0;
   std::atomic<bool> running{true};
   std::mutex writeMutex;
   LONGLONG frameIndex = 0;
@@ -128,11 +128,15 @@ struct Recorder : NativeCapture {
   std::thread audioThread;
   LONGLONG audioTime = 0;
 
-  void prepareCrop() {
+  void prepareCrop(int requestedOutW = 0, int requestedOutH = 0) {
     cropX = std::max(0, std::min(cropX, width - 1));
     cropY = std::max(0, std::min(cropY, height - 1));
-    outW = cropW > 0 ? std::min(cropW, width - cropX) : width;
-    outH = cropH > 0 ? std::min(cropH, height - cropY) : height;
+    srcW = cropW > 0 ? std::min(cropW, width - cropX) : width;
+    srcH = cropH > 0 ? std::min(cropH, height - cropY) : height;
+    srcW = std::max(2, srcW & ~1);
+    srcH = std::max(2, srcH & ~1);
+    outW = requestedOutW > 0 ? std::min(requestedOutW, srcW) : srcW;
+    outH = requestedOutH > 0 ? std::min(requestedOutH, srcH) : srcH;
     outW = std::max(2, outW & ~1);
     outH = std::max(2, outH & ~1);
   }
@@ -216,7 +220,7 @@ struct Recorder : NativeCapture {
     check(ctx->QueryInterface(videoContext.put()), "Q ID3D11VideoContext");
     D3D11_VIDEO_PROCESSOR_CONTENT_DESC desc{};
     desc.InputFrameFormat = D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE;
-    desc.InputWidth = outW; desc.InputHeight = outH;
+    desc.InputWidth = srcW; desc.InputHeight = srcH;
     desc.OutputWidth = outW; desc.OutputHeight = outH;
     desc.Usage = D3D11_VIDEO_USAGE_PLAYBACK_NORMAL;
     check(videoDevice->CreateVideoProcessorEnumerator(&desc, videoEnumerator.put()), "CreateVideoProcessorEnumerator");
@@ -230,8 +234,38 @@ struct Recorder : NativeCapture {
     com_ptr<ID3D11Texture2D> src; check(access->GetInterface(__uuidof(ID3D11Texture2D), src.put_void()), "GetInterface texture");
     com_ptr<ID3D11Texture2D>& dst = format == DXGI_FORMAT_NV12 ? nv12Texture : argbTexture;
     if (!dst) dst = createTexture(format, format == DXGI_FORMAT_NV12 ? (D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE) : (D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE));
-    D3D11_BOX box{ (UINT)cropX, (UINT)cropY, 0, (UINT)(cropX + outW), (UINT)(cropY + outH), 1 };
-    ctx->CopySubresourceRegion(dst.get(), 0, 0, 0, 0, src.get(), 0, &box);
+    D3D11_BOX box{ (UINT)cropX, (UINT)cropY, 0, (UINT)(cropX + srcW), (UINT)(cropY + srcH), 1 };
+    if (srcW == outW && srcH == outH) {
+      ctx->CopySubresourceRegion(dst.get(), 0, 0, 0, 0, src.get(), 0, &box);
+      return dst;
+    }
+    if (!bgraTexture) {
+      D3D11_TEXTURE2D_DESC bgraDesc{};
+      bgraDesc.Width = srcW; bgraDesc.Height = srcH; bgraDesc.MipLevels = 1; bgraDesc.ArraySize = 1;
+      bgraDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+      bgraDesc.SampleDesc.Count = 1;
+      bgraDesc.Usage = D3D11_USAGE_DEFAULT;
+      bgraDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
+      check(d3d->CreateTexture2D(&bgraDesc, nullptr, bgraTexture.put()), "CreateTexture2D bgra scale");
+    }
+    ctx->CopySubresourceRegion(bgraTexture.get(), 0, 0, 0, 0, src.get(), 0, &box);
+    initVideoProcessor();
+    D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC inDesc{};
+    inDesc.ViewDimension = D3D11_VPIV_DIMENSION_TEXTURE2D;
+    inDesc.Texture2D.MipSlice = 0;
+    inDesc.Texture2D.ArraySlice = 0;
+    com_ptr<ID3D11VideoProcessorInputView> inputView;
+    check(videoDevice->CreateVideoProcessorInputView(bgraTexture.get(), videoEnumerator.get(), &inDesc, inputView.put()), "CreateVideoProcessorInputView scale argb");
+    D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC outDesc{};
+    outDesc.ViewDimension = D3D11_VPOV_DIMENSION_TEXTURE2D;
+    outDesc.Texture2D.MipSlice = 0;
+    com_ptr<ID3D11VideoProcessorOutputView> outputView;
+    check(videoDevice->CreateVideoProcessorOutputView(dst.get(), videoEnumerator.get(), &outDesc, outputView.put()), "CreateVideoProcessorOutputView scale argb");
+    D3D11_VIDEO_PROCESSOR_STREAM stream{};
+    stream.Enable = TRUE;
+    stream.pInputSurface = inputView.get();
+    HRESULT hr = videoContext->VideoProcessorBlt(videoProcessor.get(), outputView.get(), 0, 1, &stream);
+    if (FAILED(hr)) { std::cerr << "ERR VideoProcessorBlt scale argb 0x" << std::hex << hr << std::dec << "\n"; running=false; }
     return dst;
   }
 
@@ -239,10 +273,18 @@ struct Recorder : NativeCapture {
     auto surface = frame.Surface();
     com_ptr<::Windows::Graphics::DirectX::Direct3D11::IDirect3DDxgiInterfaceAccess> access = surface.as<::Windows::Graphics::DirectX::Direct3D11::IDirect3DDxgiInterfaceAccess>();
     com_ptr<ID3D11Texture2D> src; check(access->GetInterface(__uuidof(ID3D11Texture2D), src.put_void()), "GetInterface texture");
-    if (!bgraTexture) bgraTexture = createTexture(DXGI_FORMAT_B8G8R8A8_UNORM, D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET);
+    if (!bgraTexture) {
+      D3D11_TEXTURE2D_DESC bgraDesc{};
+      bgraDesc.Width = srcW; bgraDesc.Height = srcH; bgraDesc.MipLevels = 1; bgraDesc.ArraySize = 1;
+      bgraDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+      bgraDesc.SampleDesc.Count = 1;
+      bgraDesc.Usage = D3D11_USAGE_DEFAULT;
+      bgraDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
+      check(d3d->CreateTexture2D(&bgraDesc, nullptr, bgraTexture.put()), "CreateTexture2D bgra nv12");
+    }
     if (!nv12Texture) nv12Texture = createTexture(DXGI_FORMAT_NV12, D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE);
     initVideoProcessor();
-    D3D11_BOX box{ (UINT)cropX, (UINT)cropY, 0, (UINT)(cropX + outW), (UINT)(cropY + outH), 1 };
+    D3D11_BOX box{ (UINT)cropX, (UINT)cropY, 0, (UINT)(cropX + srcW), (UINT)(cropY + srcH), 1 };
     ctx->CopySubresourceRegion(bgraTexture.get(), 0, 0, 0, 0, src.get(), 0, &box);
 
     D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC inDesc{};
@@ -432,7 +474,8 @@ int wmain(int argc, wchar_t** argv) {
   Recorder r; r.fps = argi(argc, argv, L"--fps", 30); r.bitrate = argi(argc, argv, L"--bitrate", 8000000); r.audioEnabled = argb(argc, argv, L"--audio", false); r.audioBitrate = argi(argc, argv, L"--audio-bitrate", 128000); r.useNv12 = !isArg(argc, argv, L"--video-format", L"argb");
   r.cropX = argi(argc, argv, L"--x", 0); r.cropY = argi(argc, argv, L"--y", 0);
   r.cropW = argi(argc, argv, L"--width", 0); r.cropH = argi(argc, argv, L"--height", 0);
+  int requestedOutW = argi(argc, argv, L"--output-width", 0), requestedOutH = argi(argc, argv, L"--output-height", 0);
   std::cerr << "PIPELINE " << (r.useNv12 ? "optional NV12 D3D11 Video Processor path" : "default ARGB GPU-backed Media Foundation path") << "\n";
-  r.initD3D(); r.initCaptureMonitor(argi(argc, argv, L"--monitor", 0)); r.prepareCrop(); r.initWriter(out); r.start(); r.stop();
+  r.initD3D(); r.initCaptureMonitor(argi(argc, argv, L"--monitor", 0)); r.prepareCrop(requestedOutW, requestedOutH); r.initWriter(out); r.start(); r.stop();
   std::cerr << "DONE\n"; return 0;
 }

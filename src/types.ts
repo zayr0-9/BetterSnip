@@ -2,6 +2,7 @@ export type SnipMode = 'image' | 'video';
 export type ImageFormat = 'png' | 'jpg';
 export type VideoQuality = 'low' | 'medium' | 'high';
 export type VideoRecordingFormat = 'argb' | 'nv12';
+export type RecordingResolution = 'source' | '1080p' | '720p';
 export type CaptureType = 'image' | 'video';
 
 export interface Rect {
@@ -32,6 +33,8 @@ export interface AppConfig {
   imageFormat: ImageFormat;
   recordingFps: number;
   recordingQuality: VideoQuality;
+  recordingVideoBitrate: number;
+  recordingResolution: RecordingResolution;
   videoRecordingFormat: VideoRecordingFormat;
   copyToClipboard: boolean;
   openEditorAfterCapture: boolean;
@@ -48,6 +51,7 @@ export interface CaptureInfo {
   name: string;
   path: string;
   url: string;
+  thumbUrl?: string;
   mtime?: number;
   size?: number;
   type?: CaptureType;

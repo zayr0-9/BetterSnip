@@ -2,6 +2,7 @@ import fs from "fs";
 import http from "http";
 import path from "path";
 import { spawn } from "child_process";
+import crypto from "crypto";
 import { Readable } from "stream";
 import {
   app,
@@ -55,9 +56,28 @@ let recordingJob: RecordingJob | null = null;
 const skipPreviewRecordings = new Set<string>();
 
 function recordingBitrate(): number {
+  const manual = Number(config.recordingVideoBitrate);
+  if (Number.isFinite(manual) && manual > 0)
+    return Math.round(Math.min(Math.max(manual, 500_000), 100_000_000));
   if (config.recordingQuality === "low") return 3_000_000;
   if (config.recordingQuality === "medium") return 5_000_000;
   return 8_000_000;
+}
+
+function recordingOutputSize(crop: Rect): { outputWidth?: number; outputHeight?: number } {
+  const mode = config.recordingResolution || "source";
+  if (mode === "source") return {};
+
+  const maxHeight = mode === "720p" ? 720 : 1080;
+  const sourceW = Math.max(2, Math.round(crop.width));
+  const sourceH = Math.max(2, Math.round(crop.height));
+  if (sourceH <= maxHeight) return {};
+
+  let outputHeight = maxHeight;
+  let outputWidth = Math.round((sourceW * outputHeight) / sourceH);
+  outputWidth = Math.max(2, outputWidth & ~1);
+  outputHeight = Math.max(2, outputHeight & ~1);
+  return { outputWidth, outputHeight };
 }
 let snipStarting = false;
 
@@ -169,6 +189,91 @@ function runProcess(exe: string, args: string[]): Promise<{ stdout: string; stde
       else reject(new Error(stderr.trim() || `${path.basename(exe)} exited with code ${code}`));
     });
   });
+}
+
+function thumbnailDir(): string {
+  const dir = path.join(app.getPath("userData"), "thumbs");
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+function thumbnailPathFor(filePath: string, stat: fs.Stats): string {
+  const key = crypto
+    .createHash("sha1")
+    .update(`${path.resolve(filePath)}:${Math.round(stat.mtimeMs)}:${stat.size}`)
+    .digest("hex");
+  return path.join(thumbnailDir(), `${key}.jpg`);
+}
+
+const thumbnailQueue = new Set<string>();
+const thumbnailFailures = new Map<string, number>();
+
+function thumbnailFailureKey(filePath: string, stat: fs.Stats): string {
+  return `${path.resolve(filePath)}:${Math.round(stat.mtimeMs)}:${stat.size}`;
+}
+
+function queueVideoThumbnail(filePath: string): void {
+  if (thumbnailQueue.has(filePath) || !fs.existsSync(filePath)) return;
+  const stat = fs.statSync(filePath);
+  const failureKey = thumbnailFailureKey(filePath, stat);
+  if (thumbnailFailures.has(failureKey)) return;
+
+  thumbnailQueue.add(filePath);
+  void generateVideoThumbnail(filePath)
+    .catch((err) => {
+      thumbnailFailures.set(failureKey, Date.now());
+      const message = err instanceof Error ? err.message : String(err);
+      const concise = message
+        .split(/\r?\n/)
+        .filter((line) =>
+          /moov atom not found|Invalid data|Error opening input|No such file|Permission denied/i.test(line),
+        )
+        .slice(-3)
+        .join(" | ") || message.split(/\r?\n/).slice(-1)[0];
+      console.warn("[thumb] failed to generate video thumbnail", { filePath, error: concise });
+    })
+    .finally(() => thumbnailQueue.delete(filePath));
+}
+
+async function generateVideoThumbnail(filePath: string): Promise<string | null> {
+  if (!fs.existsSync(filePath)) return null;
+  const stat = fs.statSync(filePath);
+  const outputPath = thumbnailPathFor(filePath, stat);
+  if (fs.existsSync(outputPath) && fs.statSync(outputPath).size > 0) return outputPath;
+
+  const tempPath = path.join(
+    path.dirname(outputPath),
+    `${path.basename(outputPath, ".jpg")}.tmp-${process.pid}.jpg`,
+  );
+  try {
+    await runProcess(ffmpegExePath(), [
+      "-y",
+      "-ss", "0.2",
+      "-i", filePath,
+      "-frames:v", "1",
+      "-vf", "scale=360:-2",
+      "-q:v", "3",
+      "-f", "image2",
+      tempPath,
+    ]);
+    if (!fs.existsSync(tempPath) || fs.statSync(tempPath).size <= 0) return null;
+    fs.renameSync(tempPath, outputPath);
+  } finally {
+    try {
+      if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
+    } catch {}
+  }
+  settingsWindow?.webContents.send("gallery:changed");
+  return outputPath;
+}
+
+function getVideoThumbUrl(filePath: string, stat: fs.Stats): string | undefined {
+  const thumbPath = thumbnailPathFor(filePath, stat);
+  if (fs.existsSync(thumbPath) && fs.statSync(thumbPath).size > 0)
+    return mediaUrl(thumbPath, Math.round(fs.statSync(thumbPath).mtimeMs));
+  if (!thumbnailFailures.has(thumbnailFailureKey(filePath, stat)))
+    queueVideoThumbnail(filePath);
+  return undefined;
 }
 
 function directorySize(dirPath: string): number {
@@ -468,12 +573,14 @@ async function prepareRecording(
   };
   recordingJob = job;
   if (skipPreview) skipPreviewRecordings.add(filePath);
+  const outputSize = recordingOutputSize(crop);
   await startNativeRecording({
     filePath,
     rect: crop,
     monitorIndex,
     fps: config.recordingFps,
     bitrate: recordingBitrate(),
+    ...outputSize,
     videoFormat: config.videoRecordingFormat,
     audio: !!audio,
     audioBitrate: 128_000,
@@ -754,12 +861,14 @@ async function recordVideoForAgent(
     ? uniqueFilePath(config.saveDir, `agent-recording-${timestamp()}`, "mp4")
     : path.join(app.getPath("temp"), `bettersnip-agent-${Date.now()}.mp4`);
 
+  const outputSize = recordingOutputSize(crop);
   await startNativeRecording({
     filePath,
     rect: crop,
     monitorIndex,
     fps: options.fps || config.recordingFps,
     bitrate: options.bitrate || recordingBitrate(),
+    ...outputSize,
     videoFormat: config.videoRecordingFormat,
   });
   await sleep(durationMs);
@@ -776,8 +885,8 @@ async function recordVideoForAgent(
     displayBounds: display.bounds,
     scaleFactor: display.scaleFactor,
     nativeCrop: crop,
-    outputWidth: crop.width - (crop.width % 2),
-    outputHeight: crop.height - (crop.height % 2),
+    outputWidth: outputSize.outputWidth || crop.width - (crop.width % 2),
+    outputHeight: outputSize.outputHeight || crop.height - (crop.height % 2),
     durationMs,
   };
   if (save || options.returnType === "path") result.path = filePath;
@@ -1008,13 +1117,15 @@ ipcMain.handle("gallery:list", () => {
       const filePath = path.join(config.saveDir, d.name);
       const stat = fs.statSync(filePath);
       const ext = path.extname(d.name).toLowerCase();
+      const type = ext === ".webm" || ext === ".mp4" ? "video" : "image";
       return {
         name: d.name,
         path: filePath,
         url: mediaUrl(filePath, Math.round(stat.mtimeMs)),
+        thumbUrl: type === "video" ? getVideoThumbUrl(filePath, stat) : undefined,
         mtime: stat.mtimeMs,
         size: stat.size,
-        type: ext === ".webm" || ext === ".mp4" ? "video" : "image",
+        type,
       };
     })
     .sort((a, b) => b.mtime - a.mtime);

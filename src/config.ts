@@ -10,6 +10,8 @@ export const DEFAULTS: AppConfig = {
   imageFormat: "png",
   recordingFps: 30,
   recordingQuality: "high",
+  recordingVideoBitrate: 8_000_000,
+  recordingResolution: "source",
   videoRecordingFormat: "argb",
   copyToClipboard: true,
   openEditorAfterCapture: true,
@@ -29,10 +31,25 @@ function configPath(): string {
   return path.join(app.getPath("userData"), "settings.json");
 }
 
+function presetRecordingBitrate(quality = DEFAULTS.recordingQuality): number {
+  if (quality === "low") return 3_000_000;
+  if (quality === "medium") return 5_000_000;
+  return 8_000_000;
+}
+
+function normalizeRecordingBitrate(value: unknown, quality = DEFAULTS.recordingQuality): number {
+  const fallback = presetRecordingBitrate(quality);
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) return fallback;
+  return Math.round(Math.min(Math.max(numeric, 500_000), 100_000_000));
+}
+
 function normalizeConfig(config: PartialAppConfig = {}): AppConfig {
+  const quality = config.recordingQuality || DEFAULTS.recordingQuality;
   return {
     ...DEFAULTS,
     ...config,
+    recordingVideoBitrate: normalizeRecordingBitrate(config.recordingVideoBitrate, quality),
     lmStudio: { ...DEFAULTS.lmStudio, ...(config.lmStudio || {}) },
   };
 }
