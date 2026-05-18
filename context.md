@@ -208,9 +208,24 @@ Native Windows screenshot capture wrapper.
 
 Native Windows video recording wrapper.
 
-- `startNativeRecording()` starts native recording.
-- `stopNativeRecording()` stops and returns file path.
-- `cancelNativeRecording()` cancels active recording.
+- `startNativeRecording()` starts native recording by spawning `win-recorder.exe`.
+- `stopNativeRecording()` sends `stop` over stdin and waits for the native process to exit so Media Foundation MP4 finalization has completed before main checks file size.
+- `cancelNativeRecording()` kills/cancels active recording.
+- Video format selection:
+  - Default is `argb` DXGI GPU texture input for broad compatibility across Windows GPU drivers/hardware encoders.
+  - `nv12` GPU conversion path exists but is opt-in with environment variable `BETTERSNIP_RECORDER_VIDEO_FORMAT=nv12`; some drivers accept NV12 frames but hang in `IMFSinkWriter::Finalize()`.
+  - The wrapper watches startup stderr and can fall back from early NV12 startup/sample errors to ARGB for the current app session.
+
+### `native/win-recorder/main.cpp`
+
+Native Windows capture/encode executable used by screenshots and video recording.
+
+- Uses Windows.Graphics.Capture to capture monitor frames as D3D11 textures.
+- Video recording default pipeline is GPU-backed ARGB/BGRA DXGI texture submission to Media Foundation H.264 Sink Writer, avoiding per-frame CPU readback.
+- Optional `--video-format nv12` path does GPU BGRA -> NV12 conversion with D3D11 Video Processor and submits NV12 DXGI surfaces to the encoder. Keep this as opt-in/test mode until robust driver capability probing is added.
+- Uses capture frame `SystemRelativeTime` / QPC timestamps rather than `frameIndex * fps`, preventing sped-up recordings when frames are dropped.
+- On stop, logs `FINALIZE begin` / `FINALIZE done` or `ERR Finalize 0x...` around `IMFSinkWriter::Finalize()`.
+- Audio recording, when enabled, uses WASAPI loopback and writes audio samples to the same Sink Writer.
 
 ### `src/nativeClipboard.ts`
 

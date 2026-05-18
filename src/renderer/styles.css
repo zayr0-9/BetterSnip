@@ -131,3 +131,52 @@ button:disabled { cursor: not-allowed; }
   .annotate-page .bg-blue-600, .annotate-page .hover\:bg-blue-700:hover { background:#2b2b2b !important; color:#fff !important; }
   .annotate-page .bg-neutral-800, .annotate-page .hover\:bg-neutral-900:hover { background:#2b2b2b !important; color:#fff !important; }
 }
+
+@media (prefers-color-scheme: dark) {
+  .annotate-page .text-slate-950,
+  .annotate-page .text-slate-900,
+  .annotate-page .text-slate-800,
+  .annotate-page .text-slate-700 { color:#f5f5f5 !important; }
+  .annotate-page .text-slate-600,
+  .annotate-page .text-slate-500,
+  .annotate-page .text-slate-400 { color:#d0d0d0 !important; }
+  .annotate-page .border-slate-200,
+  .annotate-page .border-slate-300 { border-color:#3a3a3a !important; }
+  .annotate-page .bg-white,
+  .annotate-page .bg-white\/70,
+  .annotate-page .bg-white\/80,
+  .annotate-page .bg-white\/90,
+  .annotate-page .bg-white\/95 { background:#181818 !important; border-color:#3a3a3a !important; box-shadow:none !important; }
+  .annotate-page .bg-slate-50,
+  .annotate-page input,
+  .annotate-page select,
+  .annotate-page textarea { background:#242424 !important; border-color:#454545 !important; color:#f5f5f5 !important; }
+  .annotate-page .bg-slate-100,
+  .annotate-page .bg-slate-200,
+  .annotate-page .bg-neutral-100 { background:#303030 !important; color:#f5f5f5 !important; }
+  .annotate-page .hover\:bg-blue-50:hover,
+  .annotate-page .hover\:bg-blue-50\/40:hover,
+  .annotate-page .hover\:bg-slate-50:hover,
+  .annotate-page .hover\:bg-slate-100:hover,
+  .annotate-page .hover\:bg-slate-200:hover,
+  .annotate-page .hover\:bg-neutral-200:hover { background:#303030 !important; color:#fff !important; }
+  .annotate-page .border-blue-100,
+  .annotate-page .border-blue-600,
+  .annotate-page .hover\:border-blue-300:hover { border-color:#555 !important; }
+  .annotate-page .bg-blue-50,
+  .annotate-page .bg-blue-100 { background:#242424 !important; }
+  .annotate-page .text-blue-600,
+  .annotate-page .text-blue-700,
+  .annotate-page .hover\:text-blue-700:hover { color:#d0d0d0 !important; }
+  .annotate-page .bg-blue-600,
+  .annotate-page .hover\:bg-blue-700:hover,
+  .annotate-page .bg-emerald-600,
+  .annotate-page .hover\:bg-emerald-700:hover,
+  .annotate-page .bg-neutral-800,
+  .annotate-page .hover\:bg-neutral-900:hover { background:#2b2b2b !important; color:#fff !important; }
+  .annotate-page .shadow-blue-600\/20,
+  .annotate-page .shadow-emerald-600\/20,
+  .annotate-page .shadow-slate-900\/5 { box-shadow:none !important; }
+  .annotate-page input.accent-blue-600 { accent-color:#666 !important; }
+  .annotate-page .focus\:ring-blue-500:focus { --tw-ring-color:#666 !important; }
+}

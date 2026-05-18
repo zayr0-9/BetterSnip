@@ -32,6 +32,25 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Download FFmpeg runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $version = "7.1"
+          $archiveName = "ffmpeg-n$version-latest-win64-gpl-$version.zip"
+          $url = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/$archiveName"
+          $vendorRoot = "vendor/ffmpeg-n$version-latest-win64-gpl-$version"
+          $binDir = "$vendorRoot/bin"
+          New-Item -ItemType Directory -Force -Path $binDir | Out-Null
+          Invoke-WebRequest -Uri $url -OutFile $archiveName
+          Expand-Archive -Force -Path $archiveName -DestinationPath vendor
+          if (!(Test-Path "$binDir/ffmpeg.exe") -or !(Test-Path "$binDir/ffprobe.exe")) {
+            throw "FFmpeg runtime download did not produce expected binaries."
+          }
+          Remove-Item -Force $archiveName
+          Remove-Item -Recurse -Force -ErrorAction SilentlyContinue "$vendorRoot/doc", "$vendorRoot/presets"
+          Remove-Item -Force -ErrorAction SilentlyContinue "$binDir/ffplay.exe"
+
       - name: Build and publish Windows packages
         if: startsWith(github.ref, 'refs/tags/')
         run: pnpm build -- --publish always

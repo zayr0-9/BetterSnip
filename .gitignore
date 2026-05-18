@@ -5,6 +5,7 @@ node_modules/
 .pnpm-store/
 
 # Electron / build output
+.dev-dist/
 dist/
 build/
 out/
@@ -33,3 +34,16 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.temp
+
+# FFmpeg vendor artifacts not needed at runtime
+vendor/*.zip
+vendor/ffmpeg-*/doc/
+vendor/ffmpeg-*/presets/
+vendor/ffmpeg-*/bin/ffplay.exe
+# Large FFmpeg binaries - downloaded/provided locally, not committed to Git
+vendor/ffmpeg-*/bin/ffmpeg.exe
+vendor/ffmpeg-*/bin/ffprobe.exe
+
+
+# Tool/editor backups
+*.backup.*

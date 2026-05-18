@@ -10,6 +10,7 @@ export const DEFAULTS: AppConfig = {
   imageFormat: "png",
   recordingFps: 30,
   recordingQuality: "high",
+  videoRecordingFormat: "argb",
   copyToClipboard: true,
   openEditorAfterCapture: true,
   autoStart: false,

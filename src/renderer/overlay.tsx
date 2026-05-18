@@ -10,6 +10,7 @@ const display: Rect = {
   width: Number(params.get("width") || window.innerWidth),
   height: Number(params.get("height") || window.innerHeight),
 };
+const frozenBackground = params.get("background") || "";
 
 function OverlayApp() {
   const rootRef = useRef<HTMLDivElement>(null);
@@ -307,6 +308,14 @@ function OverlayApp() {
       ref={rootRef}
       className="h-screen w-screen overflow-hidden cursor-crosshair select-none"
     >
+      {frozenBackground ? (
+        <img
+          src={frozenBackground}
+          alt=""
+          draggable={false}
+          className="fixed inset-0 z-0 h-screen w-screen object-fill pointer-events-none select-none"
+        />
+      ) : null}
       <div ref={shadeRef} className="fixed inset-0 z-[1] bg-black/35" />
       <button
         ref={closeBtnRef}

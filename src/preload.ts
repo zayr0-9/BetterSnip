@@ -13,6 +13,8 @@ const api: BetterSnipApi = {
   listGallery: () => ipcRenderer.invoke("gallery:list"),
   deleteGalleryItem: (filePath: string) =>
     ipcRenderer.invoke("gallery:delete", filePath),
+  copyGalleryItem: (filePath: string) =>
+    ipcRenderer.invoke("gallery:copy", filePath),
   onGalleryChanged: (callback: () => void) => {
     ipcRenderer.on("gallery:changed", callback);
   },
@@ -41,6 +43,9 @@ const api: BetterSnipApi = {
   openAnnotation: (filePath: string) =>
     ipcRenderer.invoke("annotation:open", filePath),
   openAnnotationFile: () => ipcRenderer.invoke("annotation:openFile"),
+  getVideoMetadata: (filePath: string) =>
+    ipcRenderer.invoke("video:metadata", filePath),
+  editVideo: (options) => ipcRenderer.invoke("video:edit", options),
 };
 
 contextBridge.exposeInMainWorld("betterSnip", api);

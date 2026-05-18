@@ -7,9 +7,12 @@ import type {
   ImageFormat,
   PartialAppConfig,
   VideoQuality,
+  VideoRecordingFormat,
 } from "../types";
 import { Icons } from "./components/Icons";
 import { TitleBar } from "./components/TitleBar";
+import { GalleryLightbox } from "./components/gallery/GalleryLightbox";
+import { GallerySection, type GalleryViewMode } from "./components/gallery/GallerySection";
 
 const defaultLm = {
   enabled: false,
@@ -26,63 +29,13 @@ const defaultSettings: AppConfig = {
   imageFormat: "png",
   recordingFps: 30,
   recordingQuality: "high",
+  videoRecordingFormat: "argb",
   copyToClipboard: true,
   openEditorAfterCapture: true,
   autoStart: false,
   onboardingComplete: false,
   lmStudio: defaultLm,
 };
-
-function Thumb({
-  item,
-  active,
-  small,
-  onClick,
-}: {
-  item: CaptureInfo;
-  active: boolean;
-  small?: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      title={item.name}
-      className={`${small ? "h-16 w-24" : "h-[96px] w-[136px]"} shrink-0 overflow-hidden rounded-xl border border-slate-200 bg-slate-200 shadow-sm ${active ? "thumb-current" : ""}`}
-    >
-      {item.type === "video" ? (
-        <VideoThumb item={item} />
-      ) : (
-        <img
-          src={item.url}
-          className="h-full w-full object-cover"
-          alt={item.name}
-        />
-      )}
-    </button>
-  );
-}
-
-function VideoThumb({ item }: { item: CaptureInfo }) {
-  return (
-    <div className="relative h-full w-full bg-slate-900 text-white">
-      <video
-        src={item.url}
-        className="h-full w-full object-cover"
-        muted
-        preload="metadata"
-        playsInline
-        aria-label={item.name}
-      />
-      <div className="absolute inset-0 grid place-items-center bg-black/20">
-        <Icons.Play className="h-7 w-7 drop-shadow" />
-      </div>
-      <div className="absolute inset-x-0 bottom-0 truncate bg-black/55 px-1 py-0.5 text-[10px]">
-        {item.name}
-      </div>
-    </div>
-  );
-}
 
 function SettingsApp() {
   const [settings, setSettings] = useState<AppConfig>(defaultSettings);
@@ -94,21 +47,17 @@ function SettingsApp() {
   const [formatOpen, setFormatOpen] = useState(false);
   const [fpsOpen, setFpsOpen] = useState(false);
   const [qualityOpen, setQualityOpen] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [lmStudioOpen, setLmStudioOpen] = useState(false);
+  const [galleryViewMode, setGalleryViewMode] = useState<GalleryViewMode>("strip");
   const [status, setStatus] = useState("");
   const [storageUsage, setStorageUsage] = useState("");
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [onboardingStep, setOnboardingStep] = useState(1);
   const [onboardingStatus, setOnboardingStatus] = useState("");
-  const [swipeX, setSwipeX] = useState<number | null>(null);
-  const rowRef = useRef<HTMLDivElement>(null);
-  const modalThumbsRef = useRef<HTMLDivElement>(null);
-  const [thumbPages, setThumbPages] = useState({ count: 0, current: 0 });
-  const thumbMeasureRaf = useRef<number | null>(null);
   const saveTimer = useRef<number | null>(null);
   const statusTimer = useRef<number | null>(null);
   const lastSavedSettings = useRef("");
-  const videoRef = useRef<HTMLVideoElement>(null);
   const params = new URLSearchParams(location.search);
   const isOnboarding = params.get("mode") === "onboarding";
   const item = gallery[currentImage];
@@ -150,6 +99,7 @@ function SettingsApp() {
       imageFormat: source.imageFormat,
       recordingFps: source.recordingFps,
       recordingQuality: source.recordingQuality,
+      videoRecordingFormat: source.videoRecordingFormat,
       copyToClipboard: source.copyToClipboard,
       openEditorAfterCapture: source.openEditorAfterCapture,
       autoStart: source.autoStart,
@@ -220,85 +170,6 @@ function SettingsApp() {
     return () => window.removeEventListener("pointerdown", onPointerDown);
   }, []);
 
-  const updateThumbPages = useCallback(() => {
-    const el = rowRef.current;
-    if (!el) {
-      setThumbPages({ count: 0, current: 0 });
-      return;
-    }
-
-    const maxScroll = Math.max(0, el.scrollWidth - el.clientWidth);
-    const pageWidth = Math.max(1, el.clientWidth);
-    const count = Math.max(1, Math.ceil(maxScroll / pageWidth) + 1);
-    const current = Math.min(
-      count - 1,
-      Math.max(0, Math.round(el.scrollLeft / pageWidth)),
-    );
-    setThumbPages({ count, current });
-  }, []);
-
-  useEffect(() => {
-    if (thumbMeasureRaf.current !== null)
-      cancelAnimationFrame(thumbMeasureRaf.current);
-    thumbMeasureRaf.current = requestAnimationFrame(updateThumbPages);
-
-    const onResize = () => updateThumbPages();
-    window.addEventListener("resize", onResize);
-    return () => {
-      window.removeEventListener("resize", onResize);
-      if (thumbMeasureRaf.current !== null)
-        cancelAnimationFrame(thumbMeasureRaf.current);
-    };
-  }, [gallery.length, isOnboarding, updateThumbPages]);
-
-  const centerModalThumb = useCallback(
-    (index = currentImage) => {
-      modalThumbsRef.current?.children[index]?.scrollIntoView({
-        behavior: "smooth",
-        inline: "center",
-        block: "nearest",
-      });
-    },
-    [currentImage],
-  );
-
-  useEffect(() => {
-    if (modalOpen) centerModalThumb();
-  }, [modalOpen, currentImage, centerModalThumb]);
-  useEffect(() => {
-    if (!modalOpen || !item || item.type !== "video") return;
-    const v = videoRef.current;
-    if (!v) return;
-    v.src = item.url;
-    v.load();
-    v.play().catch(() => {});
-  }, [modalOpen, item]);
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (!modalOpen) return;
-      if (e.key === "Escape") closeModal();
-      if (e.key === "ArrowLeft") moveImage(-1, true);
-      if (e.key === "ArrowRight") moveImage(1, true);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  });
-
-  const scrollThumbnailsBy = useCallback(
-    (ref: React.RefObject<HTMLDivElement | null>, direction: number) => {
-      const el = ref.current;
-      if (!el) return;
-      const thumb = el.firstElementChild as HTMLElement | null;
-      const gap = parseFloat(getComputedStyle(el).columnGap || "0") || 0;
-      const step = thumb ? thumb.offsetWidth + gap : 160;
-      const visibleSteps = Math.max(1, Math.floor(el.clientWidth / step) - 1);
-      el.scrollBy({
-        left: direction * step * visibleSteps,
-        behavior: "smooth",
-      });
-    },
-    [],
-  );
 
   function update<K extends keyof AppConfig>(key: K, value: AppConfig[K]) {
     setSettings((s) => ({ ...s, [key]: value }));
@@ -316,15 +187,11 @@ function SettingsApp() {
     if (statusTimer.current !== null) window.clearTimeout(statusTimer.current);
     statusTimer.current = window.setTimeout(() => setStatus(""), 2500);
   }
-  function nudge(direction: number) {
-    scrollThumbnailsBy(rowRef, direction);
-  }
   function openGallery(index: number) {
     setCurrentImage(Math.max(0, Math.min(index, gallery.length - 1)));
     setModalOpen(true);
   }
   function closeModal() {
-    videoRef.current?.pause();
     setModalOpen(false);
     setDeleteConfirmOpen(false);
   }
@@ -346,11 +213,9 @@ function SettingsApp() {
     if (skipDeleteConfirm) void deleteCurrentImage();
     else setDeleteConfirmOpen(true);
   }
-  function moveImage(delta: number, slideThumbs = false) {
+  function moveImage(delta: number) {
     if (!gallery.length) return;
-    const next = (currentImage + delta + gallery.length) % gallery.length;
-    setCurrentImage(next);
-    if (slideThumbs) requestAnimationFrame(() => centerModalThumb(next));
+    setCurrentImage((currentImage + delta + gallery.length) % gallery.length);
   }
 
   async function finishOnboarding() {
@@ -414,72 +279,15 @@ function SettingsApp() {
                 </button>
               </div>
             </section>
-            <section className="space-y-5">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <h2 className="text-base font-semibold text-slate-800">
-                    Recent gallery
-                  </h2>
-                  <button
-                    onClick={loadGallery}
-                    className="inline-flex items-center gap-2 text-base font-medium text-blue-600 hover:text-blue-700"
-                  >
-                    <Icons.Refresh className="h-5 w-5" />
-                  </button>
-                </div>
-                <button
-                  onClick={() => window.betterSnip.openDir()}
-                  className="inline-flex items-center gap-2 text-base font-medium text-blue-600 hover:text-blue-700"
-                >
-                  Browse Gallery <Icons.Image className="h-5 w-5" />
-                </button>
-              </div>
-              <div className="relative px-14">
-                <button
-                  onClick={() => nudge(-1)}
-                  className="absolute left-0 top-1/2 z-10 grid h-12 w-12 -translate-y-1/2 place-items-center rounded-full border border-slate-200 bg-white/95 text-slate-900 shadow-lg hover:bg-slate-50"
-                >
-                  <Icons.ChevronLeft className="h-6 w-6" />
-                </button>
-                <div className="gallery-fade relative overflow-hidden">
-                  <div
-                    ref={rowRef}
-                    className="gallery-scroll flex min-h-[118px] gap-5 overflow-x-auto overscroll-contain px-2 pt-1 pb-4"
-                    onScroll={updateThumbPages}
-                  >
-                    {gallery.slice(0, 30).map((g, i) => (
-                      <Thumb
-                        key={g.path}
-                        item={g}
-                        active={i === currentImage}
-                        onClick={() => openGallery(i)}
-                      />
-                    ))}
-                  </div>
-                </div>
-                <button
-                  onClick={() => nudge(1)}
-                  className="absolute right-0 top-1/2 z-10 grid h-12 w-12 -translate-y-1/2 place-items-center rounded-full border border-slate-200 bg-white/95 text-slate-900 shadow-lg hover:bg-slate-50"
-                >
-                  <Icons.ChevronRight className="h-6 w-6" />
-                </button>
-              </div>
-              <div className="flex justify-center gap-2">
-                {Array.from({ length: Math.max(1, thumbPages.count) }).map(
-                  (_, i) => (
-                    <span
-                      key={i}
-                      className={`h-1.5 w-7 rounded-full ${i === thumbPages.current ? "bg-blue-600" : "bg-slate-200"}`}
-                    ></span>
-                  ),
-                )}
-              </div>
-              {!gallery.length && (
-                <p className="text-sm text-slate-500">
-                  No screenshots found yet.
-                </p>
-              )}
-            </section>
+            <GallerySection
+              gallery={gallery}
+              currentIndex={currentImage}
+              viewMode={galleryViewMode}
+              onViewModeChange={setGalleryViewMode}
+              onOpen={openGallery}
+              onRefresh={loadGallery}
+              onBrowse={() => window.betterSnip.openDir()}
+            />
             <section className="grid grid-cols-1 gap-7 lg:grid-cols-[1fr_1fr]">
               <div className="space-y-3">
                 <label className="block pb-2 text-base font-semibold text-slate-800">
@@ -761,6 +569,56 @@ function SettingsApp() {
                 </div>
               </div>
             </section>
+            <section className="rounded-none border-y border-slate-200 bg-transparent py-4">
+              <button
+                type="button"
+                onClick={() => setAdvancedOpen((open) => !open)}
+                aria-expanded={advancedOpen}
+                aria-controls="advanced-settings"
+                className="flex w-full cursor-pointer items-center justify-between text-base font-semibold text-slate-800"
+              >
+                <span>Advanced Settings</span>
+                <Icons.ChevronDown
+                  className={`h-5 w-5 transition-transform duration-300 ${advancedOpen ? "rotate-180" : ""}`}
+                />
+              </button>
+              <div
+                id="advanced-settings"
+                className={`grid transition-[grid-template-rows,opacity,transform] duration-300 ease-out ${advancedOpen ? "grid-rows-[1fr] opacity-100 translate-y-0" : "grid-rows-[0fr] opacity-0 -translate-y-2"}`}
+              >
+                <div className="overflow-hidden">
+                  <div className="mt-5 space-y-4 rounded-2xl border border-slate-200 bg-transparent p-4">
+                    <div className="space-y-2">
+                      <p className="text-sm font-medium text-slate-800">
+                        Video recording pipeline
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        ARGB is the default GPU-backed Media Foundation path and is the most compatible. NV12 uses D3D11 Video Processor conversion and may be faster on some systems, but can hang or fail with some GPU drivers.
+                      </p>
+                    </div>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      {([
+                        ["argb", "ARGB GPU", "Default / most compatible"],
+                        ["nv12", "NV12 GPU", "Experimental / fastest when supported"],
+                      ] as [VideoRecordingFormat, string, string][]).map(([format, label, description]) => (
+                        <button
+                          key={format}
+                          type="button"
+                          onClick={() => update("videoRecordingFormat", format)}
+                          className={`rounded-xl border px-4 py-3 text-left transition ${settings.videoRecordingFormat === format ? "border-blue-600 bg-blue-50 text-blue-900" : "border-slate-200 bg-white/70 text-slate-700 hover:border-blue-300 hover:bg-blue-50/40"}`}
+                        >
+                          <span className="block text-sm font-semibold">{label}</span>
+                          <span className="mt-1 block text-xs opacity-75">{description}</span>
+                        </button>
+                      ))}
+                    </div>
+                    <p className="text-xs text-slate-500">
+                      Current selection: <code>{settings.videoRecordingFormat === "nv12" ? "optional NV12 D3D11 Video Processor path" : "default ARGB GPU-backed Media Foundation path"}</code>. Applies to new recordings.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </section>
             <div className="flex items-center gap-4">
               <p className="text-sm text-slate-500">
                 {status || "Changes save automatically."}
@@ -856,133 +714,24 @@ function SettingsApp() {
           </section>
         )}
       </main>
-      {modalOpen && item && (
-        <div className="no-drag fixed inset-0 z-50 bg-black/95 text-white">
-          <button
-            onClick={closeModal}
-            className="no-drag absolute right-4 top-4 z-40 grid h-10 w-10 place-items-center rounded-full bg-white/15 text-white shadow-lg shadow-black/30 ring-1 ring-white/15 hover:bg-white/25"
-            title="Close"
-          >
-            <Icons.Close className="h-5 w-5" />
-          </button>
-          <button
-            onClick={async () => {
-              closeModal();
-              await window.betterSnip.openAnnotation(item.path);
-            }}
-            className="no-drag absolute right-16 top-4 z-40 grid h-10 w-10 place-items-center rounded-full bg-white/15 text-white shadow-lg shadow-black/30 ring-1 ring-white/15 hover:bg-white/25"
-            title="Edit"
-          >
-            <Icons.Edit className="h-5 w-5" />
-          </button>
-          <button
-            onClick={requestDeleteCurrentImage}
-            className="no-drag absolute right-28 top-4 z-40 grid h-10 w-10 place-items-center rounded-full bg-red-500/30 text-red-100 shadow-lg shadow-black/30 ring-1 ring-red-200/20 hover:bg-red-500/45"
-            title="Delete"
-          >
-            <Icons.Trash className="h-5 w-5" />
-          </button>
-          {deleteConfirmOpen && (
-            <div className="absolute inset-0 z-30 grid place-items-center bg-neutral-900/30 px-4 backdrop-blur-sm">
-              <div className="delete-confirm-card w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 text-slate-900 shadow-2xl">
-                <h3 className="text-lg font-semibold">Delete this capture?</h3>
-                <p className="mt-2 break-words text-sm text-slate-600">
-                  This will permanently delete {item.name}.
-                </p>
-                <label className="mt-5 flex items-center gap-3 text-sm text-slate-600">
-                  <input
-                    type="checkbox"
-                    checked={skipDeleteConfirm}
-                    onChange={(e) => setSkipDeleteConfirm(e.target.checked)}
-                    className="h-4 w-4 rounded accent-red-500"
-                  />
-                  <span>Don't ask me again this session</span>
-                </label>
-                <div className="mt-6 flex justify-end gap-3">
-                  <button
-                    onClick={() => setDeleteConfirmOpen(false)}
-                    className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-medium hover:bg-slate-200"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={() => void deleteCurrentImage()}
-                    className="rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold hover:bg-red-700 text-white"
-                  >
-                    Delete
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-          <button
-            onClick={() => moveImage(-1, true)}
-            className="no-drag absolute left-4 top-1/2 z-40 grid h-14 w-14 -translate-y-1/2 place-items-center rounded-full border border-white/30 bg-slate-950/35 text-white shadow-2xl shadow-black/40 backdrop-blur-xl ring-1 ring-black/20 transition-transform hover:bg-slate-950/55 hover:scale-105"
-            title="Previous"
-          >
-            <Icons.ChevronLeft className="h-8 w-8 drop-shadow-[0_2px_4px_rgba(0,0,0,0.85)]" />
-          </button>
-          <button
-            onClick={() => moveImage(1, true)}
-            className="no-drag absolute right-4 top-1/2 z-40 grid h-14 w-14 -translate-y-1/2 place-items-center rounded-full border border-white/30 bg-slate-950/35 text-white shadow-2xl shadow-black/40 backdrop-blur-xl ring-1 ring-black/20 transition-transform hover:bg-slate-950/55 hover:scale-105"
-            title="Next"
-          >
-            <Icons.ChevronRight className="h-8 w-8 drop-shadow-[0_2px_4px_rgba(0,0,0,0.85)]" />
-          </button>
-          <div
-            onPointerDown={(e) => setSwipeX(e.clientX)}
-            onPointerUp={(e) => {
-              if (swipeX !== null && Math.abs(e.clientX - swipeX) > 50)
-                moveImage(e.clientX < swipeX ? 1 : -1);
-              setSwipeX(null);
-            }}
-            onWheel={(e) => {
-              if (Math.abs(e.deltaX) > Math.abs(e.deltaY))
-                moveImage(e.deltaX > 0 ? 1 : -1);
-            }}
-            className="relative z-10 flex h-full flex-col"
-          >
-            <div className="flex min-h-0 flex-1 items-center justify-center p-6 pb-3">
-              {item.type === "video" ? (
-                <video
-                  ref={videoRef}
-                  className="max-h-full max-w-full rounded-xl shadow-2xl"
-                  controls
-                  autoPlay
-                  playsInline
-                />
-              ) : (
-                <img
-                  src={item.url}
-                  alt={item.name}
-                  className="max-h-full max-w-full rounded-xl object-contain shadow-2xl"
-                  draggable="false"
-                />
-              )}
-            </div>
-            <div className="shrink-0 border-t border-white/10 bg-black/80 p-3">
-              <p className="mb-2 truncate text-center text-sm text-slate-200">
-                {currentImage + 1} / {gallery.length} — {item.name}
-              </p>
-              <div
-                ref={modalThumbsRef}
-                onWheel={(e) => e.stopPropagation()}
-                className="gallery-scroll flex gap-3 overflow-x-auto overscroll-contain px-[45%] pt-2 pb-4"
-              >
-                {gallery.map((g, i) => (
-                  <Thumb
-                    key={g.path}
-                    item={g}
-                    active={i === currentImage}
-                    small
-                    onClick={() => setCurrentImage(i)}
-                  />
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      <GalleryLightbox
+        open={modalOpen}
+        gallery={gallery}
+        currentIndex={currentImage}
+        deleteConfirmOpen={deleteConfirmOpen}
+        skipDeleteConfirm={skipDeleteConfirm}
+        onClose={closeModal}
+        onIndexChange={setCurrentImage}
+        onMove={moveImage}
+        onEdit={async (selectedItem) => {
+          closeModal();
+          await window.betterSnip.openAnnotation(selectedItem.path);
+        }}
+        onRequestDelete={requestDeleteCurrentImage}
+        onConfirmDelete={deleteCurrentImage}
+        onCancelDelete={() => setDeleteConfirmOpen(false)}
+        onSkipDeleteConfirmChange={setSkipDeleteConfirm}
+      />
     </div>
   );
 }

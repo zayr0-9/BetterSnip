@@ -1,6 +1,7 @@
 import fs from "fs";
 import http from "http";
 import path from "path";
+import { spawn } from "child_process";
 import { Readable } from "stream";
 import {
   app,
@@ -38,6 +39,14 @@ let settingsWindow: BrowserWindow | null = null;
 let overlayWindows: BrowserWindow[] = [];
 let config: AppConfig;
 let foregroundAtSnip: ForegroundInfo | null = null;
+type FrozenSnipDisplay = {
+  displayId: number;
+  bounds: Rect;
+  scaleFactor: number;
+  monitorIndex: number;
+  filePath: string;
+};
+let frozenSnipDisplays: FrozenSnipDisplay[] = [];
 let annotationWindow: BrowserWindow | null = null;
 let annotationFilePath: string | null = null;
 let recordingControlsWindow: BrowserWindow | null = null;
@@ -69,8 +78,9 @@ if (process.platform === "win32") app.setAppUserModelId("com.bettersnip.app");
 
 const isDev = !app.isPackaged;
 const devServerUrl = process.env.VITE_DEV_SERVER_URL;
+const projectRoot = isDev ? path.resolve(__dirname, "..") : undefined;
 const appIconPath = isDev
-  ? path.resolve(__dirname, "..", "build", "icon.ico")
+  ? path.resolve(projectRoot!, "build", "icon.ico")
   : path.join(process.resourcesPath, "icon.ico");
 
 function appIcon(): Electron.NativeImage {
@@ -116,6 +126,49 @@ function loadRendererPage(
 function mediaUrl(filePath: string, version: number): string {
   const encodedPath = Buffer.from(filePath, "utf8").toString("base64url");
   return `bettersnip-file://local/${encodedPath}?v=${version}`;
+}
+
+function ffmpegExePath(): string {
+  const candidates = isDev
+    ? [
+        path.resolve(projectRoot!, "vendor", "ffmpeg-n7.1-latest-win64-gpl-7.1", "bin", "ffmpeg.exe"),
+        path.resolve(projectRoot!, "vendor", "ffmpeg.exe"),
+      ]
+    : [
+        path.join(process.resourcesPath, "vendor", "ffmpeg-n7.1-latest-win64-gpl-7.1", "bin", "ffmpeg.exe"),
+        path.join(process.resourcesPath, "vendor", "ffmpeg.exe"),
+      ];
+  const found = candidates.find((candidate) => fs.existsSync(candidate));
+  if (!found) throw new Error("Bundled FFmpeg binary was not found.");
+  return found;
+}
+
+function ffprobeExePath(): string | null {
+  const candidates = isDev
+    ? [
+        path.resolve(projectRoot!, "vendor", "ffmpeg-n7.1-latest-win64-gpl-7.1", "bin", "ffprobe.exe"),
+        path.resolve(projectRoot!, "vendor", "ffprobe.exe"),
+      ]
+    : [
+        path.join(process.resourcesPath, "vendor", "ffmpeg-n7.1-latest-win64-gpl-7.1", "bin", "ffprobe.exe"),
+        path.join(process.resourcesPath, "vendor", "ffprobe.exe"),
+      ];
+  return candidates.find((candidate) => fs.existsSync(candidate)) || null;
+}
+
+function runProcess(exe: string, args: string[]): Promise<{ stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(exe, args, { windowsHide: true });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => { stdout += chunk.toString(); });
+    child.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code === 0) resolve({ stdout, stderr });
+      else reject(new Error(stderr.trim() || `${path.basename(exe)} exited with code ${code}`));
+    });
+  });
 }
 
 function directorySize(dirPath: string): number {
@@ -205,34 +258,37 @@ function createAnnotationWindow(filePath: string): void {
   });
 }
 
-function createRecordingWindow(job: RecordingJob): void {
+function createRecordingWindow(job: RecordingJob, options: { showBorder?: boolean } = {}): void {
   recordingJob = job;
   const controlW = 170;
   const controlH = 52;
+  const showBorder = options.showBorder !== false;
 
-  recordingBorderWindow = new BrowserWindow({
-    width: Math.max(1, Math.round(job.rect.width)),
-    height: Math.max(1, Math.round(job.rect.height)),
-    x: Math.round(job.rect.x),
-    y: Math.round(job.rect.y),
-    title: "Recording Border",
-    frame: false,
-    transparent: true,
-    alwaysOnTop: true,
-    fullscreenable: false,
-    skipTaskbar: true,
-    resizable: false,
-    movable: false,
-    focusable: false,
-    webPreferences: { preload: path.join(__dirname, "preload.js") },
-  });
-  recordingBorderWindow.setContentProtection(true);
-  recordingBorderWindow.setAlwaysOnTop(true, "screen-saver");
-  recordingBorderWindow.setIgnoreMouseEvents(true, { forward: true });
-  loadRendererPage(recordingBorderWindow, "recorder.html", { view: "border" });
-  recordingBorderWindow.on("closed", () => {
-    recordingBorderWindow = null;
-  });
+  if (showBorder) {
+    recordingBorderWindow = new BrowserWindow({
+      width: Math.max(1, Math.round(job.rect.width)),
+      height: Math.max(1, Math.round(job.rect.height)),
+      x: Math.round(job.rect.x),
+      y: Math.round(job.rect.y),
+      title: "Recording Border",
+      frame: false,
+      transparent: true,
+      alwaysOnTop: true,
+      fullscreenable: false,
+      skipTaskbar: true,
+      resizable: false,
+      movable: false,
+      focusable: false,
+      webPreferences: { preload: path.join(__dirname, "preload.js") },
+    });
+    recordingBorderWindow.setContentProtection(true);
+    recordingBorderWindow.setAlwaysOnTop(true, "screen-saver");
+    recordingBorderWindow.setIgnoreMouseEvents(true, { forward: true });
+    loadRendererPage(recordingBorderWindow, "recorder.html", { view: "border" });
+    recordingBorderWindow.on("closed", () => {
+      recordingBorderWindow = null;
+    });
+  }
 
   recordingControlsWindow = new BrowserWindow({
     width: controlW,
@@ -300,7 +356,7 @@ function applyAutoStart(enabled: boolean): void {
   app.setLoginItemSettings({
     openAtLogin: !!enabled,
     path: process.execPath,
-    args: isDev ? [path.resolve(__dirname, "..")] : [],
+    args: isDev ? [projectRoot!] : [],
   });
 }
 
@@ -312,8 +368,21 @@ async function startSnip(): Promise<void> {
 
   snipStarting = true;
   foregroundAtSnip = await getForegroundApp();
+  frozenSnipDisplays = [];
+
+  // Freeze the desktop before creating/focusing the overlay. This preserves
+  // transient UI like context menus that Windows would otherwise dismiss once
+  // the overlay takes focus. The overlay then shows this frozen frame as its
+  // background, and final region capture crops from the same frozen frame.
+  try {
+    frozenSnipDisplays = await captureFrozenSnipDisplays();
+  } catch (err) {
+    console.warn("[snip] failed to capture frozen desktop frame", err);
+    frozenSnipDisplays = [];
+  }
 
   overlayWindows = screen.getAllDisplays().map((display) => {
+    const frozen = frozenSnipDisplays.find((item) => item.displayId === display.id);
     const win = new BrowserWindow({
       x: display.bounds.x,
       y: display.bounds.y,
@@ -337,6 +406,7 @@ async function startSnip(): Promise<void> {
       y: String(display.bounds.y),
       width: String(display.bounds.width),
       height: String(display.bounds.height),
+      background: frozen ? mediaUrl(frozen.filePath, Date.now()) : "",
     });
     win.once("ready-to-show", () => {
       win.show();
@@ -355,7 +425,12 @@ async function startSnip(): Promise<void> {
   }, 500);
 }
 
-async function prepareRecording(rect: Rect, audio = false, skipPreview = false): Promise<string> {
+async function prepareRecording(
+  rect: Rect,
+  audio = false,
+  skipPreview = false,
+  options: { showBorder?: boolean } = {},
+): Promise<string> {
   if (process.platform !== "win32")
     throw new Error(
       "Video snip is Windows-only for now. macOS/Linux paths are reserved for future native handling.",
@@ -399,10 +474,11 @@ async function prepareRecording(rect: Rect, audio = false, skipPreview = false):
     monitorIndex,
     fps: config.recordingFps,
     bitrate: recordingBitrate(),
+    videoFormat: config.videoRecordingFormat,
     audio: !!audio,
     audioBitrate: 128_000,
   });
-  createRecordingWindow(job);
+  createRecordingWindow(job, { showBorder: options.showBorder });
   closeOverlays();
   return filePath;
 }
@@ -414,13 +490,88 @@ async function startFullScreenRecording(): Promise<void> {
   }
   foregroundAtSnip = await getForegroundApp();
   const focused = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
-  await prepareRecording(focused.bounds, false, true).catch((err) =>
+  await prepareRecording(focused.bounds, true, true, { showBorder: false }).catch((err) =>
     dialog.showErrorBox("BetterSnip", err instanceof Error ? err.message : String(err)),
   );
 }
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function cleanupFrozenSnipDisplays(): void {
+  for (const item of frozenSnipDisplays) {
+    try {
+      if (fs.existsSync(item.filePath)) fs.unlinkSync(item.filePath);
+    } catch (err) {
+      console.warn("[snip] failed to remove frozen desktop frame", item.filePath, err);
+    }
+  }
+  frozenSnipDisplays = [];
+}
+
+async function captureFrozenSnipDisplays(): Promise<FrozenSnipDisplay[]> {
+  if (process.platform !== "win32") return [];
+  ensureSaveDir();
+
+  const captures: FrozenSnipDisplay[] = [];
+  const displays = screen.getAllDisplays();
+  for (let monitorIndex = 0; monitorIndex < displays.length; monitorIndex += 1) {
+    const display = displays[monitorIndex];
+    const filePath = path.join(
+      app.getPath("temp"),
+      `bettersnip-freeze-${process.pid}-${display.id}-${Date.now()}.png`,
+    );
+    const rect = {
+      x: 0,
+      y: 0,
+      width: Math.max(1, Math.round(display.bounds.width * display.scaleFactor)),
+      height: Math.max(1, Math.round(display.bounds.height * display.scaleFactor)),
+    };
+    await captureNativeScreenshot({ filePath, rect, monitorIndex, format: "png" });
+    captures.push({
+      displayId: display.id,
+      bounds: display.bounds,
+      scaleFactor: display.scaleFactor,
+      monitorIndex,
+      filePath,
+    });
+  }
+  return captures;
+}
+
+async function cropFrozenSnipAndSave(rect: Rect): Promise<string | null> {
+  const frozen = frozenSnipDisplays.find((item) =>
+    rect.x >= item.bounds.x &&
+    rect.y >= item.bounds.y &&
+    rect.x < item.bounds.x + item.bounds.width &&
+    rect.y < item.bounds.y + item.bounds.height,
+  );
+  if (!frozen) return null;
+
+  ensureSaveDir();
+  const ext = config.imageFormat === "jpg" ? "jpg" : "png";
+  const slug = buildForegroundSlug(foregroundAtSnip) || "screenshot";
+  const filePath = uniqueFilePath(config.saveDir, `${slug}-${timestamp()}`, ext);
+  const image = nativeImage.createFromPath(frozen.filePath);
+  if (image.isEmpty()) return null;
+
+  const scale = frozen.scaleFactor;
+  const crop = {
+    x: Math.max(0, Math.round((rect.x - frozen.bounds.x) * scale)),
+    y: Math.max(0, Math.round((rect.y - frozen.bounds.y) * scale)),
+    width: Math.max(1, Math.round(rect.width * scale)),
+    height: Math.max(1, Math.round(rect.height * scale)),
+  };
+  const size = image.getSize();
+  crop.width = Math.max(1, Math.min(crop.width, size.width - crop.x));
+  crop.height = Math.max(1, Math.min(crop.height, size.height - crop.y));
+
+  const cropped = image.crop(crop);
+  const data = ext === "jpg" ? cropped.toJPEG(92) : cropped.toPNG();
+  fs.writeFileSync(filePath, data);
+  if (config.copyToClipboard) clipboard.writeImage(cropped);
+  return filePath;
 }
 
 function showSavedToast(
@@ -441,7 +592,8 @@ function showSavedToast(
   }
 }
 
-function copyFileToClipboard(filePath: string): void {
+function copyFileToClipboard(filePath: string, options: { respectSetting?: boolean } = {}): void {
+  const respectSetting = options.respectSetting !== false;
   const exists = fs.existsSync(filePath);
   const size = exists ? fs.statSync(filePath).size : 0;
   console.log("[clipboard] copyFileToClipboard called", {
@@ -449,10 +601,11 @@ function copyFileToClipboard(filePath: string): void {
     exists,
     size,
     copyToClipboard: config.copyToClipboard,
+    respectSetting,
     platform: process.platform,
   });
 
-  if (!config.copyToClipboard) {
+  if (respectSetting && !config.copyToClipboard) {
     console.log("[clipboard] skipped: copyToClipboard setting is disabled");
     return;
   }
@@ -522,6 +675,10 @@ async function captureAndSave(rect: Rect): Promise<string> {
   ensureSaveDir();
 
   rect = normalizeCaptureRect(rect);
+
+  const frozenFilePath = await cropFrozenSnipAndSave(rect);
+  if (frozenFilePath) return frozenFilePath;
+
   for (const win of overlayWindows) {
     if (!win.isDestroyed()) {
       win.setIgnoreMouseEvents(true);
@@ -603,6 +760,7 @@ async function recordVideoForAgent(
     monitorIndex,
     fps: options.fps || config.recordingFps,
     bitrate: options.bitrate || recordingBitrate(),
+    videoFormat: config.videoRecordingFormat,
   });
   await sleep(durationMs);
   await stopNativeRecording();
@@ -747,6 +905,99 @@ ipcMain.handle("annotation:save", (_, dataUrl, saveAsCopy = false) => {
   return targetPath;
 });
 
+ipcMain.handle("video:metadata", async (_, filePath) => {
+  const target = validateGalleryFile(filePath);
+  const probe = ffprobeExePath();
+  if (!probe) return { duration: 0, width: 0, height: 0 };
+  const { stdout } = await runProcess(probe, [
+    "-v", "error",
+    "-print_format", "json",
+    "-show_format",
+    "-show_streams",
+    target,
+  ]);
+  const parsed = JSON.parse(stdout || "{}");
+  const video = parsed.streams?.find((stream: any) => stream.codec_type === "video") || {};
+  return {
+    duration: Number(parsed.format?.duration || video.duration || 0),
+    width: Number(video.width || 0),
+    height: Number(video.height || 0),
+  };
+});
+
+ipcMain.handle("video:edit", async (_, options) => {
+  if (!options?.inputPath) throw new Error("No video is open for editing.");
+  const inputPath = validateGalleryFile(options.inputPath);
+  const source = path.parse(inputPath);
+  const format = String(options.format || source.ext.slice(1) || "mp4").toLowerCase() === "webm" ? "webm" : "mp4";
+  const targetPath = options.saveAsCopy === false
+    ? path.join(source.dir, `${source.name}-processing.${format}`)
+    : uniqueFilePath(source.dir, `${source.name}-edited`, format);
+
+  const args: string[] = ["-y"];
+  const start = Math.max(0, Number(options.startTime || 0));
+  const end = Math.max(0, Number(options.endTime || 0));
+  if (start > 0) args.push("-ss", String(start));
+  args.push("-i", inputPath);
+  if (end > start) args.push("-t", String(end - start));
+
+  const filtersList: string[] = [];
+  const crop = options.crop || {};
+  if (crop.enabled) {
+    const w = Math.max(2, Math.round(Number(crop.width || 0)));
+    const h = Math.max(2, Math.round(Number(crop.height || 0)));
+    const x = Math.max(0, Math.round(Number(crop.x || 0)));
+    const y = Math.max(0, Math.round(Number(crop.y || 0)));
+    filtersList.push(`crop=${w}:${h}:${x}:${y}`);
+  }
+  const resize = options.resize || {};
+  if (resize.enabled) {
+    const w = Math.max(2, Math.round(Number(resize.width || -1)));
+    const h = Math.max(2, Math.round(Number(resize.height || -1)));
+    filtersList.push(`scale=${w}:${h}`);
+  }
+  const speed = Math.max(0.25, Math.min(4, Number(options.speed || 1)));
+  if (speed !== 1) filtersList.push(`setpts=${(1 / speed).toFixed(5)}*PTS`);
+  if (filtersList.length) args.push("-vf", filtersList.join(","));
+
+  const removeAudio = !!options.removeAudio;
+  if (removeAudio) args.push("-an");
+  else if (speed !== 1) args.push("-filter:a", `atempo=${Math.max(0.5, Math.min(2, speed)).toFixed(5)}`);
+
+  const quality = Number(options.quality || 23);
+  if (format === "mp4") args.push("-c:v", "libx264", "-preset", "veryfast", "-crf", String(quality), "-pix_fmt", "yuv420p");
+  else args.push("-c:v", "libvpx-vp9", "-crf", String(quality), "-b:v", "0");
+  if (!removeAudio) args.push("-c:a", format === "mp4" ? "aac" : "libopus");
+  args.push(targetPath);
+
+  await runProcess(ffmpegExePath(), args);
+
+  let finalPath = targetPath;
+  if (options.saveAsCopy === false) {
+    const replacement = path.join(source.dir, `${source.name}.${format}`);
+    if (replacement !== inputPath && fs.existsSync(replacement)) fs.unlinkSync(replacement);
+    if (replacement === inputPath) {
+      fs.unlinkSync(inputPath);
+      fs.renameSync(targetPath, inputPath);
+      finalPath = inputPath;
+    } else {
+      try { fs.unlinkSync(inputPath); } catch {}
+      fs.renameSync(targetPath, replacement);
+      finalPath = replacement;
+    }
+    annotationFilePath = finalPath;
+  }
+
+  settingsWindow?.webContents.send("gallery:changed");
+  showSavedToast(finalPath);
+  return {
+    path: finalPath,
+    name: path.basename(finalPath),
+    url: mediaUrl(finalPath, Math.round(fs.statSync(finalPath).mtimeMs)),
+    type: "video",
+  };
+});
+
 ipcMain.handle("gallery:list", () => {
   ensureSaveDir();
   const exts = new Set([".png", ".jpg", ".jpeg", ".webm", ".mp4"]);
@@ -768,17 +1019,26 @@ ipcMain.handle("gallery:list", () => {
     .sort((a, b) => b.mtime - a.mtime);
 });
 
-ipcMain.handle("gallery:delete", (_, filePath) => {
+function validateGalleryFile(filePath: string): string {
   ensureSaveDir();
   if (!filePath) throw new Error("Capture not found.");
   const target = path.resolve(filePath);
   const saveDir = path.resolve(config.saveDir);
   if (path.dirname(target) !== saveDir)
-    throw new Error("Cannot delete files outside the save folder.");
+    throw new Error("Cannot access files outside the save folder.");
   const ext = path.extname(target).toLowerCase();
   if (![".png", ".jpg", ".jpeg", ".webm", ".mp4"].includes(ext))
     throw new Error("Unsupported capture type.");
   if (!fs.existsSync(target)) throw new Error("Capture not found.");
+  return target;
+}
+
+ipcMain.handle("gallery:copy", (_, filePath) => {
+  copyFileToClipboard(validateGalleryFile(filePath), { respectSetting: false });
+});
+
+ipcMain.handle("gallery:delete", (_, filePath) => {
+  const target = validateGalleryFile(filePath);
   fs.unlinkSync(target);
   settingsWindow?.webContents.send("gallery:changed");
 });
@@ -808,6 +1068,7 @@ ipcMain.handle("settings:save", (_, next) => {
   return config;
 });
 function closeOverlays(): void {
+  cleanupFrozenSnipDisplays();
   snipStarting = false;
   const all = BrowserWindow.getAllWindows().filter(
     (w) => !w.isDestroyed() && w.webContents.getURL().includes("overlay.html"),

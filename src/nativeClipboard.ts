@@ -6,6 +6,7 @@ import { spawn } from "child_process";
 export function resolveClipboardFileExe(): string {
   const name = "clipboard-file.exe";
   const appPath = app.getAppPath();
+  const cwd = process.cwd();
   const candidates = [
     // electron-builder unpacks executables from asar into app.asar.unpacked.
     path.join(process.resourcesPath || "", "app.asar.unpacked", "dist", "native", name),
@@ -14,6 +15,9 @@ export function resolveClipboardFileExe(): string {
     path.join(appPath, "dist", "native", name),
     path.join(appPath, "native", "clipboard-file", "x64", "Release", name),
     path.join(appPath, "native", "clipboard-file", "Release", name),
+    path.join(cwd, "dist", "native", name),
+    path.join(cwd, "native", "clipboard-file", "x64", "Release", name),
+    path.join(cwd, "native", "clipboard-file", "Release", name),
   ];
   return candidates.find((p) => p && fs.existsSync(p)) || candidates[0];
 }

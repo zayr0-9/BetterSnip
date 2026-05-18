@@ -1,6 +1,7 @@
 export type SnipMode = 'image' | 'video';
 export type ImageFormat = 'png' | 'jpg';
 export type VideoQuality = 'low' | 'medium' | 'high';
+export type VideoRecordingFormat = 'argb' | 'nv12';
 export type CaptureType = 'image' | 'video';
 
 export interface Rect {
@@ -31,6 +32,7 @@ export interface AppConfig {
   imageFormat: ImageFormat;
   recordingFps: number;
   recordingQuality: VideoQuality;
+  videoRecordingFormat: VideoRecordingFormat;
   copyToClipboard: boolean;
   openEditorAfterCapture: boolean;
   autoStart: boolean;
@@ -102,6 +104,25 @@ export interface StorageUsage {
   bytes: number;
 }
 
+export interface VideoMetadata {
+  duration: number;
+  width: number;
+  height: number;
+}
+
+export interface VideoEditOptions {
+  inputPath: string;
+  startTime?: number;
+  endTime?: number;
+  format?: 'mp4' | 'webm';
+  quality?: number;
+  speed?: number;
+  removeAudio?: boolean;
+  saveAsCopy?: boolean;
+  crop?: { enabled?: boolean; x?: number; y?: number; width?: number; height?: number };
+  resize?: { enabled?: boolean; width?: number; height?: number };
+}
+
 export interface BetterSnipApi {
   getSettings(): Promise<AppConfig>;
   chooseDir(): Promise<AppConfig>;
@@ -111,6 +132,7 @@ export interface BetterSnipApi {
   openDir(): Promise<void>;
   listGallery(): Promise<CaptureInfo[]>;
   deleteGalleryItem(filePath: string): Promise<void>;
+  copyGalleryItem(filePath: string): Promise<void>;
   onGalleryChanged(callback: () => void): void;
   minimizeWindow(): Promise<void>;
   maximizeWindow(): Promise<void>;
@@ -128,6 +150,8 @@ export interface BetterSnipApi {
   saveAnnotation(dataUrl: string, saveAsCopy?: boolean): Promise<string>;
   openAnnotation(filePath: string): Promise<string>;
   openAnnotationFile(): Promise<void>;
+  getVideoMetadata(filePath: string): Promise<VideoMetadata>;
+  editVideo(options: VideoEditOptions): Promise<CaptureInfo>;
 }
 
 export {};
