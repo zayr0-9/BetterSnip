@@ -146,6 +146,13 @@ export const Icons = {
       <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
     </Icon>
   ),
+  Info: (p: { className?: string }) => (
+    <Icon {...p}>
+      <circle cx="12" cy="12" r="10" />
+      <path d="M12 16v-4" />
+      <path d="M12 8h.01" />
+    </Icon>
+  ),
   External: (p: { className?: string }) => (
     <Icon {...p}>
       <path d="M15 3h6v6" />

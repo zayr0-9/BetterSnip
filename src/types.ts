@@ -49,6 +49,7 @@ export interface CaptureInfo {
   path: string;
   url: string;
   mtime?: number;
+  size?: number;
   type?: CaptureType;
 }
 

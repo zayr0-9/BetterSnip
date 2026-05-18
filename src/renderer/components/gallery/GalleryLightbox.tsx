@@ -36,6 +36,7 @@ export function GalleryLightbox({
 }) {
   const [swipeX, setSwipeX] = useState<number | null>(null);
   const [copied, setCopied] = useState(false);
+  const [infoOpen, setInfoOpen] = useState(false);
   const modalThumbsRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const item = gallery[currentIndex];
@@ -78,13 +79,54 @@ export function GalleryLightbox({
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!open) return;
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") {
+        if (infoOpen) setInfoOpen(false);
+        else onClose();
+      }
+      if (infoOpen) return;
       if (e.key === "ArrowLeft") moveAndCenter(-1);
       if (e.key === "ArrowRight") moveAndCenter(1);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [moveAndCenter, onClose, open]);
+  }, [infoOpen, moveAndCenter, onClose, open]);
+
+  useEffect(() => {
+    if (!open) setInfoOpen(false);
+  }, [open]);
+
+  const formatBytes = (bytes?: number) => {
+    if (!Number.isFinite(bytes || NaN) || !bytes) return "Unknown";
+    const units = ["B", "KB", "MB", "GB", "TB"];
+    const index = Math.min(
+      units.length - 1,
+      Math.floor(Math.log(bytes) / Math.log(1024)),
+    );
+    const value = bytes / 1024 ** index;
+    return `${value >= 10 || index === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[index]}`;
+  };
+
+  const formatDate = (mtime?: number) =>
+    mtime
+      ? new Date(mtime).toLocaleString(undefined, {
+          dateStyle: "medium",
+          timeStyle: "medium",
+        })
+      : "Unknown";
+
+  const extension = item?.name.includes(".")
+    ? item.name.split(".").pop()?.toUpperCase()
+    : undefined;
+  const metadataRows = item
+    ? [
+        ["Name", item.name],
+        ["Type", item.type === "video" ? "Video" : "Image"],
+        ["Format", extension || "Unknown"],
+        ["Size", formatBytes(item.size)],
+        ["Modified", formatDate(item.mtime)],
+        ["Path", item.path],
+      ]
+    : [];
 
   if (!open || !item) return null;
 
@@ -123,20 +165,76 @@ export function GalleryLightbox({
         )}
       </button>
       <button
+        onClick={() => setInfoOpen(true)}
+        className="no-drag absolute right-40 top-4 z-40 grid h-10 w-10 place-items-center rounded-full border border-white/15 bg-slate-950/35 text-white shadow-2xl shadow-black/40 backdrop-blur-xl ring-1 ring-black/20 transition-transform hover:bg-slate-950/55 hover:scale-105"
+        title="File info"
+      >
+        <Icons.Info className="h-5 w-5 drop-shadow-[0_2px_4px_rgba(0,0,0,0.85)]" />
+      </button>
+      <button
         onClick={onRequestDelete}
-        className="no-drag absolute right-40 top-4 z-40 grid h-10 w-10 place-items-center rounded-full border border-white/15 bg-slate-950/35 text-red-100 shadow-2xl shadow-black/40 backdrop-blur-xl ring-1 ring-black/20 transition-transform hover:bg-red-500/35 hover:scale-105"
+        className="no-drag absolute right-52 top-4 z-40 grid h-10 w-10 place-items-center rounded-full border border-white/15 bg-slate-950/35 text-red-100 shadow-2xl shadow-black/40 backdrop-blur-xl ring-1 ring-black/20 transition-transform hover:bg-red-500/35 hover:scale-105"
         title="Delete"
       >
         <Icons.Trash className="h-5 w-5 drop-shadow-[0_2px_4px_rgba(0,0,0,0.85)]" />
       </button>
+      {infoOpen && (
+        <div
+          className="absolute inset-0 z-30 grid place-items-center bg-black/25 px-4 backdrop-blur-md"
+          onClick={() => setInfoOpen(false)}
+        >
+          <div
+            className="relative w-full max-w-lg rounded-3xl border border-white/20 bg-white/10 p-6 text-white shadow-2xl shadow-black/50 ring-1 ring-white/10 backdrop-blur-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              onClick={() => setInfoOpen(false)}
+              className="absolute right-4 top-4 grid h-9 w-9 place-items-center rounded-full border border-white/15 bg-white/10 text-white transition hover:bg-white/20"
+              title="Close file info"
+            >
+              <Icons.Close className="h-4 w-4" />
+            </button>
+            <div className="pr-12">
+              <h3 className="text-xl font-semibold">File info</h3>
+              <p className="mt-1 truncate text-sm text-slate-300">{item.name}</p>
+            </div>
+            <div className="mt-6 space-y-3">
+              {metadataRows.map(([label, value]) => (
+                <div
+                  key={label}
+                  className="grid grid-cols-[92px_1fr] gap-4 rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-sm"
+                >
+                  <div className="font-medium text-slate-300">{label}</div>
+                  <div className="break-words text-white">{value}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
       {deleteConfirmOpen && (
-        <div className="absolute inset-0 z-30 grid place-items-center bg-neutral-900/30 px-4 backdrop-blur-sm">
-          <div className="delete-confirm-card w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 text-slate-900 shadow-2xl">
-            <h3 className="text-lg font-semibold">Delete this capture?</h3>
-            <p className="mt-2 break-words text-sm text-slate-600">
-              This will permanently delete {item.name}.
-            </p>
-            <label className="mt-5 flex items-center gap-3 text-sm text-slate-600">
+        <div
+          className="absolute inset-0 z-30 grid place-items-center bg-black/25 px-4 backdrop-blur-md"
+          onClick={onCancelDelete}
+        >
+          <div
+            className="delete-confirm-card relative w-full max-w-md rounded-3xl border border-white/20 bg-white/10 p-6 text-white shadow-2xl shadow-black/50 ring-1 ring-white/10 backdrop-blur-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              onClick={onCancelDelete}
+              className="absolute right-4 top-4 grid h-9 w-9 place-items-center rounded-full border border-white/15 bg-white/10 text-white transition hover:bg-white/20"
+              title="Cancel delete"
+            >
+              <Icons.Close className="h-4 w-4" />
+            </button>
+            <div className="pr-12">
+              <h3 className="text-xl font-semibold">Delete this capture?</h3>
+              <p className="mt-2 break-words text-sm text-slate-300">
+                This will permanently delete {item.name}.
+              </p>
+            </div>
+            <label className="mt-5 flex items-center gap-3 rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-sm text-slate-200">
               <input
                 type="checkbox"
                 checked={skipDeleteConfirm}
@@ -148,13 +246,13 @@ export function GalleryLightbox({
             <div className="mt-6 flex justify-end gap-3">
               <button
                 onClick={onCancelDelete}
-                className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-medium hover:bg-slate-200"
+                className="rounded-xl border border-white/15 bg-white/10 px-4 py-2 text-sm font-medium text-white transition hover:bg-white/20"
               >
                 Cancel
               </button>
               <button
                 onClick={() => void onConfirmDelete()}
-                className="rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold hover:bg-red-700 text-white"
+                className="rounded-xl border border-red-300/30 bg-red-500/80 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-red-950/30 transition hover:bg-red-500"
               >
                 Delete
               </button>

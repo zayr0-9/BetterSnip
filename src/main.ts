@@ -1013,6 +1013,7 @@ ipcMain.handle("gallery:list", () => {
         path: filePath,
         url: mediaUrl(filePath, Math.round(stat.mtimeMs)),
         mtime: stat.mtimeMs,
+        size: stat.size,
         type: ext === ".webm" || ext === ".mp4" ? "video" : "image",
       };
     })

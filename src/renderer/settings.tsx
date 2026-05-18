@@ -727,6 +727,9 @@ function SettingsApp() {
           closeModal();
           await window.betterSnip.openAnnotation(selectedItem.path);
         }}
+        onCopy={async (selectedItem) => {
+          await window.betterSnip.copyGalleryItem(selectedItem.path);
+        }}
         onRequestDelete={requestDeleteCurrentImage}
         onConfirmDelete={deleteCurrentImage}
         onCancelDelete={() => setDeleteConfirmOpen(false)}
