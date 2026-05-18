@@ -184,28 +184,30 @@ export function GalleryLightbox({
           onClick={() => setInfoOpen(false)}
         >
           <div
-            className="relative w-full max-w-lg rounded-3xl border border-white/20 bg-white/10 p-6 text-white shadow-2xl shadow-black/50 ring-1 ring-white/10 backdrop-blur-2xl"
+            className="no-drag pointer-events-auto isolate relative w-full max-w-lg overflow-hidden rounded-3xl border border-white/55 bg-slate-100/92 p-6 text-slate-950 shadow-2xl shadow-slate-950/35 backdrop-blur-[140px] backdrop-brightness-110 backdrop-saturate-200 ring-1 ring-slate-950/10 before:pointer-events-none before:absolute before:inset-0 before:z-0 before:bg-gradient-to-br before:from-white/80 before:via-sky-50/35 before:to-slate-300/45 before:content-[''] dark:border-white/18 dark:bg-slate-950/90 dark:text-white dark:shadow-black/60 dark:backdrop-brightness-75 dark:ring-black/35 dark:before:from-white/12 dark:before:via-slate-900/45 dark:before:to-black/55"
             onClick={(e) => e.stopPropagation()}
+            onPointerDown={(e) => e.stopPropagation()}
           >
             <button
+              type="button"
               onClick={() => setInfoOpen(false)}
-              className="absolute right-4 top-4 grid h-9 w-9 place-items-center rounded-full border border-white/15 bg-white/10 text-white transition hover:bg-white/20"
+              className="no-drag pointer-events-auto absolute right-4 top-4 z-50 grid h-10 w-10 place-items-center rounded-full border border-slate-950/10 bg-slate-950/5 text-slate-600 transition hover:bg-slate-950/10 hover:text-slate-950 dark:border-white/15 dark:bg-white/10 dark:text-slate-200 dark:hover:bg-white/20 dark:hover:text-white"
               title="Close file info"
             >
               <Icons.Close className="h-4 w-4" />
             </button>
-            <div className="pr-12">
-              <h3 className="text-xl font-semibold">File info</h3>
-              <p className="mt-1 truncate text-sm text-slate-300">{item.name}</p>
+            <div className="relative z-10 pr-12">
+              <h3 className="text-xl font-semibold text-slate-950 dark:text-white">File info</h3>
+              <p className="mt-1 truncate text-sm text-slate-600 dark:text-slate-200">{item.name}</p>
             </div>
-            <div className="mt-6 space-y-3">
+            <div className="relative z-10 mt-6 space-y-3">
               {metadataRows.map(([label, value]) => (
                 <div
                   key={label}
-                  className="grid grid-cols-[92px_1fr] gap-4 rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-sm"
+                  className="grid grid-cols-[92px_1fr] gap-4 rounded-2xl bg-slate-950/5 px-4 py-3 text-sm ring-1 ring-slate-950/10 dark:bg-white/10 dark:ring-white/15"
                 >
-                  <div className="font-medium text-slate-300">{label}</div>
-                  <div className="break-words text-white">{value}</div>
+                  <div className="font-medium text-slate-600 dark:text-slate-200">{label}</div>
+                  <div className="break-words text-slate-950 dark:text-white">{value}</div>
                 </div>
               ))}
             </div>
