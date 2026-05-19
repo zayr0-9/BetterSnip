@@ -1,6 +1,6 @@
 {
   "name": "better-snip",
-  "version": "0.1.9",
+  "version": "0.2.0",
   "description": "Lightweight tray-first screen snipping app with foreground-app filenames.",
   "productName": "BetterSnip",
   "main": "dist/main.js",

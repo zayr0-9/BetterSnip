@@ -94,7 +94,9 @@ function itemPreview(item: ClipboardHistoryItem): string {
 function addItem(item: ClipboardHistoryItem): void {
   const items = readIndex();
   if (items[0]?.hash === item.hash) return;
-  const next = [item, ...items.filter((existing) => existing.hash !== item.hash)].slice(0, MAX_ITEMS);
+  const existing = items.find((entry) => entry.hash === item.hash);
+  const nextItem = { ...item, favorite: existing?.favorite || false };
+  const next = [nextItem, ...items.filter((entry) => entry.hash !== item.hash)].slice(0, MAX_ITEMS);
   writeIndex(next);
   notifyChanged();
 }
@@ -221,7 +223,20 @@ export function stopClipboardHistory(): void {
 }
 
 export function listClipboardHistory(): ClipboardHistoryItem[] {
-  return readIndex().map((item) => ({ ...item, preview: item.preview || itemPreview(item) }));
+  return readIndex().map((item) => ({
+    ...item,
+    favorite: !!item.favorite,
+    preview: item.preview || itemPreview(item),
+  }));
+}
+
+export function setClipboardHistoryFavorite(id: string, favorite: boolean): void {
+  const items = readIndex();
+  const next = items.map((item) =>
+    item.id === id ? { ...item, favorite: !!favorite } : item,
+  );
+  writeIndex(next);
+  notifyChanged();
 }
 
 export function deleteClipboardHistoryItem(id: string): void {

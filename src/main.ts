@@ -31,6 +31,7 @@ import {
   copyClipboardHistoryItem,
   deleteClipboardHistoryItem,
   listClipboardHistory,
+  setClipboardHistoryFavorite,
   startClipboardHistory,
 } from "./clipboardHistory";
 import type {
@@ -1159,6 +1160,9 @@ ipcMain.handle("gallery:copy", (_, filePath) => {
 ipcMain.handle("clipboardHistory:list", () => listClipboardHistory());
 ipcMain.handle("clipboardHistory:copy", async (_, id) => copyClipboardHistoryItem(id));
 ipcMain.handle("clipboardHistory:delete", (_, id) => deleteClipboardHistoryItem(id));
+ipcMain.handle("clipboardHistory:favorite", (_, id, favorite) =>
+  setClipboardHistoryFavorite(id, favorite),
+);
 ipcMain.handle("clipboardHistory:clear", () => clearClipboardHistory());
 
 ipcMain.handle("gallery:delete", (_, filePath) => {

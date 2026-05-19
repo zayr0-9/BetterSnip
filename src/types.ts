@@ -122,6 +122,7 @@ export interface ClipboardHistoryItem {
   width?: number;
   height?: number;
   size?: number;
+  favorite?: boolean;
 }
 
 export interface StorageUsage {
@@ -160,6 +161,7 @@ export interface BetterSnipApi {
   listClipboardHistory(): Promise<ClipboardHistoryItem[]>;
   copyClipboardHistoryItem(id: string): Promise<void>;
   deleteClipboardHistoryItem(id: string): Promise<void>;
+  setClipboardHistoryFavorite(id: string, favorite: boolean): Promise<void>;
   clearClipboardHistory(): Promise<void>;
   onClipboardHistoryChanged(callback: () => void): void;
   onGalleryChanged(callback: () => void): void;

@@ -20,6 +20,8 @@ const api: BetterSnipApi = {
     ipcRenderer.invoke("clipboardHistory:copy", id),
   deleteClipboardHistoryItem: (id: string) =>
     ipcRenderer.invoke("clipboardHistory:delete", id),
+  setClipboardHistoryFavorite: (id: string, favorite: boolean) =>
+    ipcRenderer.invoke("clipboardHistory:favorite", id, favorite),
   clearClipboardHistory: () => ipcRenderer.invoke("clipboardHistory:clear"),
   onClipboardHistoryChanged: (callback: () => void) => {
     ipcRenderer.on("clipboardHistory:changed", callback);
